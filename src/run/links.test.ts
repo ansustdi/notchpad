@@ -36,6 +36,21 @@ describe("findLocations", () => {
     });
   });
 
+  it("C / C++ errors: gcc, clang and MSVC", () => {
+    expect(one("C:\\w\\main.cpp:5:3: error: 'x' was not declared")).toMatchObject({ path: "C:\\w\\main.cpp", line: 5, column: 3 });
+    expect(one("/home/u/a.c:12:1: warning: unused")).toMatchObject({ path: "/home/u/a.c", line: 12, column: 1 });
+    expect(one("C:\\w\\main.cpp(7): error C2065: 'y': undeclared identifier")).toMatchObject({ path: "C:\\w\\main.cpp", line: 7, column: 0 });
+    expect(one("In file included from util.hpp:3,")).toMatchObject({ path: "util.hpp", line: 3 });
+  });
+
+  it("absolute paths with spaces at the start of a line", () => {
+    expect(one("C:\\My Code\\main.cpp:2:10: error: 'y' was not declared")).toMatchObject({ path: "C:\\My Code\\main.cpp", line: 2, column: 10 });
+    expect(one("C:\\My Code\\main.cpp(2): error C2065: 'y'")).toMatchObject({ path: "C:\\My Code\\main.cpp", line: 2 });
+    expect(one("/home/u/my app/main.go:7:2: undefined: x")).toMatchObject({ path: "/home/u/my app/main.go", line: 7, column: 2 });
+    // Mid-line, a space still ends the path.
+    expect(one("see the file x.go:3 here").path).toBe("x.go");
+  });
+
   it("finds several and ignores unrelated text", () => {
     const l = findLocations("a.go:1 and b.rs:2:3 but not version 1.2:3 or http://x.com:80");
     expect(l.map((x) => `${x.path}:${x.line}`)).toEqual(["a.go:1", "b.rs:2"]);

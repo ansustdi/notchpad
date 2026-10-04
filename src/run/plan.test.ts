@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cargoPackageField, cargoPackageName, expandTemplate, langOf, Plan, PlanInput, planRun, safeName, splitArgs, Step, Tool } from "./plan";
+import { cargoPackageField, cargoPackageName, cmakeTarget, expandTemplate, langOf, Plan, PlanInput, planRun, safeName, splitArgs, Step, Tool } from "./plan";
 
 const tool = (program: string, version = "1.0", extra: Partial<Tool> = {}): Tool => ({
   program,
@@ -141,6 +141,99 @@ describe("planRun", () => {
   it("custom command overrides the defaults", () => {
     const p = planRun(base({ lang: "javascript", file: "/w/my app.js", custom: 'node --inspect "{file}" --name={name}' }));
     expect(argv(steps(p)[0])).toEqual(["node", "--inspect", "/w/my app.js", "--name=my app"]);
+  });
+
+  it("custom command: && chains build steps before the run", () => {
+    const s = steps(planRun(base({ lang: "cpp", file: "/w/a.cpp", custom: "g++ {file} -o {dir}/{name} && {dir}/{name}" })));
+    expect(s.map((x) => [x.kind, ...argv(x)])).toEqual([
+      ["build", "g++", "/w/a.cpp", "-o", "/w/a"],
+      ["run", "/w/a"],
+    ]);
+    expect("error" in planRun(base({ lang: "cpp", file: "/w/a.cpp", custom: "g++ {file} &&" }))).toBe(true);
+  });
+
+  it("c++: gcc compiles into the cache, then runs", () => {
+    const p = planRun(base({ lang: "cpp", file: "C:\\w\\main.cpp", tools: { "g++": tool("C:\\mingw\\g++.exe") } }));
+    const [build, run] = steps(p);
+    expect(build.kind).toBe("build");
+    expect(argv(build)).toEqual([
+      "C:\\mingw\\g++.exe",
+      "-std=c++20",
+      "-Wall",
+      "-Wextra",
+      "-g",
+      "-fdiagnostics-color=never",
+      "C:\\w\\main.cpp",
+      "-o",
+      "C:\\cache\\run\\cpp\\main.exe",
+    ]);
+    expect(run).toMatchObject({ program: "C:\\cache\\run\\cpp\\main.exe", args: [], cwd: "C:\\w", kind: "run" });
+    // The output folder gets created by writing a file into it.
+    expect("files" in p && p.files?.[0].rel).toBe("cpp/obj/.keep");
+  });
+
+  it("c: clang on Linux links libm, no .exe", () => {
+    const s = steps(planRun(base({ lang: "c", file: "/w/m.c", windows: false, cacheDir: "/c", tools: { gcc: null, clang: tool("/usr/bin/clang") } })));
+    expect(argv(s[0])).toEqual(["/usr/bin/clang", "-std=c17", "-Wall", "-Wextra", "-g", "-fdiagnostics-color=never", "/w/m.c", "-o", "/c/c/m", "-lm"]);
+    expect(s[1].program).toBe("/c/c/m");
+  });
+
+  it("c++: MSVC builds through a generated script that sets up cl", () => {
+    const vcvars = "C:\\VS\\VC\\Auxiliary\\Build\\vcvars64.bat";
+    const p = planRun(base({ lang: "cpp", file: "C:\\w\\100%.cpp", tools: { "g++": null, "clang++": null, msvc: tool(vcvars) } }));
+    if ("error" in p) throw new Error(p.error);
+    const script = p.files!.find((f) => f.rel.endsWith(".bat"))!;
+    expect(script.rel).toBe("cpp/build_App_100_.bat");
+    expect(script.content).toContain(`call "${vcvars}" >nul 2>&1 || goto vcvars_failed`);
+    // % doubled for cmd; the folder's trailing backslash doubled so it doesn't escape the quote.
+    expect(script.content).toContain('/Fe"C:\\cache\\run\\cpp\\App_100_.exe" /Fo"C:\\cache\\run\\cpp\\obj\\\\" "C:\\w\\100%%.cpp"');
+    expect(script.content).toContain("/std:c++20");
+    expect(p.steps.map((s) => s.program)).toEqual(["C:\\cache\\run\\cpp\\build_App_100_.bat", "C:\\cache\\run\\cpp\\App_100_.exe"]);
+  });
+
+  it("c / c++: CMake project builds its target in our own build folder", () => {
+    const project = { cmakeLists: "C:\\w\\CMakeLists.txt", cmakeTarget: "demo" };
+    const s = steps(planRun(base({ lang: "cpp", file: "C:\\w\\src\\main.cpp", project, tools: { cmake: tool("cmake") } })));
+    expect(s.map((x) => x.kind)).toEqual(["build", "build", "run"]);
+    const build = s[0].args[3];
+    expect(build).toMatch(/^C:\\cache\\run\\cmake\\w_[0-9a-f]{8}$/);
+    expect(s[0].args).toContain(`-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG=${build}\\bin`);
+    expect(s[1].args).toEqual(["--build", build, "--target", "demo", "--config", "Debug"]);
+    expect(s[2]).toMatchObject({ program: `${build}\\bin\\demo.exe`, cwd: "C:\\w\\src" });
+  });
+
+  it("c / c++: helpful errors when nothing is installed", () => {
+    const p = planRun(base({ lang: "c", file: "/w/a.c", tools: { gcc: null, clang: null, msvc: null } }));
+    expect("error" in p && p.error).toMatch(/No C compiler found.*build-essential/);
+  });
+});
+
+describe("cmakeTarget", () => {
+  const list = `cmake_minimum_required(VERSION 3.20)
+project(Demo CXX)
+# add_executable(old old.cpp)
+add_executable(server src/server.cpp src/net.cpp)
+add_executable(client "src/client.cpp")
+add_executable(\${PROJECT_NAME}_x x.cpp)`;
+  it("picks the target listing the file", () => {
+    expect(cmakeTarget(list, "C:\\w\\src\\client.cpp")).toBe("client");
+    expect(cmakeTarget(list, "/w/src/net.cpp")).toBe("server");
+  });
+  it("falls back to the only target, else gives up", () => {
+    expect(cmakeTarget(list, "/w/other.cpp")).toBeNull();
+    expect(cmakeTarget("project(a)\nadd_executable(app main.cpp)", "/w/helper.cpp")).toBe("app");
+    // A sub-directory list (no project()) can't be configured by itself.
+    expect(cmakeTarget("add_executable(app main.cpp)", "/w/main.cpp")).toBeNull();
+  });
+});
+
+describe("langOf: C / C++", () => {
+  it("sources run, headers don't", () => {
+    expect(langOf("cpp", "a.cc")).toBe("cpp");
+    expect(langOf("plaintext", "a.C")).toBe("c");
+    expect(langOf("c", "new 1")).toBe("c");
+    expect(langOf("cpp", "a.hpp")).toBeNull();
+    expect(langOf("c", "a.h")).toBeNull();
   });
 });
 

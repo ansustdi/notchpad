@@ -4,8 +4,24 @@
  * run store gathers the inputs (detected tools, project files) and executes the plan.
  */
 
-export type Lang = "python" | "javascript" | "typescript" | "go" | "java" | "csharp" | "rust";
-export type ToolKind = "python" | "node" | "deno" | "bun" | "tsx" | "go" | "java" | "dotnet" | "cargo" | "rustc";
+export type Lang = "python" | "javascript" | "typescript" | "go" | "java" | "csharp" | "rust" | "c" | "cpp";
+export type ToolKind =
+  | "python"
+  | "node"
+  | "deno"
+  | "bun"
+  | "tsx"
+  | "go"
+  | "java"
+  | "dotnet"
+  | "cargo"
+  | "rustc"
+  | "gcc"
+  | "g++"
+  | "clang"
+  | "clang++"
+  | "msvc"
+  | "cmake";
 
 export interface Tool {
   program: string;
@@ -39,6 +55,8 @@ export const LANG_LABEL: Record<Lang, string> = {
   java: "Java",
   csharp: "C#",
   rust: "Rust",
+  c: "C",
+  cpp: "C++",
 };
 
 const EXT: Record<string, Lang> = {
@@ -56,6 +74,11 @@ const EXT: Record<string, Lang> = {
   java: "java",
   cs: "csharp",
   rs: "rust",
+  c: "c",
+  cpp: "cpp",
+  cc: "cpp",
+  cxx: "cpp",
+  "c++": "cpp",
 };
 
 const MONACO: Record<string, Lang> = {
@@ -66,6 +89,8 @@ const MONACO: Record<string, Lang> = {
   java: "java",
   csharp: "csharp",
   rust: "rust",
+  c: "c",
+  cpp: "cpp",
 };
 
 /** File extension (lower case, no dot) or "". */
@@ -73,6 +98,8 @@ export const extOf = (name: string) => /\.([^.\\/]+)$/.exec(name)?.[1].toLowerCa
 
 /** Runnable language of a document: its extension wins, then the editor's language mode. */
 export function langOf(monacoLanguage: string, fileName: string): Lang | null {
+  // Headers aren't programs (Monaco shows them as C / C++).
+  if (/^(h|hh|hpp|hxx|inl)$/.test(extOf(fileName))) return null;
   return EXT[extOf(fileName)] ?? MONACO[monacoLanguage] ?? null;
 }
 
@@ -85,6 +112,8 @@ export const DEFAULT_EXT: Record<Lang, string> = {
   java: "java",
   csharp: "cs",
   rust: "rs",
+  c: "c",
+  cpp: "cpp",
 };
 
 /** Tools to look for, in preference order; the first one found is used. */
@@ -104,6 +133,10 @@ export function toolsFor(lang: Lang, project: Project): ToolKind[] {
       return ["dotnet"];
     case "rust":
       return project.cargoToml ? ["cargo"] : ["rustc"];
+    case "c":
+      return project.cmakeTarget ? ["cmake"] : ["gcc", "clang", "msvc"];
+    case "cpp":
+      return project.cmakeTarget ? ["cmake"] : ["g++", "clang++", "msvc"];
   }
 }
 
@@ -112,6 +145,8 @@ export const PROJECT_FILES: Partial<Record<Lang, { key: keyof Project; names: st
   go: { key: "goMod", names: ["go.mod"] },
   rust: { key: "cargoToml", names: ["Cargo.toml"] },
   csharp: { key: "csproj", names: ["*.csproj"] },
+  c: { key: "cmakeLists", names: ["CMakeLists.txt"] },
+  cpp: { key: "cmakeLists", names: ["CMakeLists.txt"] },
 };
 
 export interface Project {
@@ -120,6 +155,9 @@ export interface Project {
   /** `[package] name` from Cargo.toml: the default binary's name. */
   cargoPackage?: string | null;
   csproj?: string | null;
+  cmakeLists?: string | null;
+  /** Executable target of CMakeLists.txt that builds the file (see `cmakeTarget`). */
+  cmakeTarget?: string | null;
 }
 
 /** A string field (e.g. `name`, `edition`) of the `[package]` table in a Cargo.toml. */
@@ -138,6 +176,23 @@ export function cargoPackageField(toml: string, field: string): string | null {
 
 export const cargoPackageName = (toml: string) => cargoPackageField(toml, "name");
 
+/**
+ * The `add_executable` target of a top-level CMakeLists.txt that builds `fileName`: the one
+ * listing the file, else the only one. Null when there's no `project()` (a sub-directory list
+ * can't be configured on its own) or no clear choice; the file is then compiled by itself.
+ */
+export function cmakeTarget(text: string, fileName: string): string | null {
+  const code = text.replace(/#.*$/gm, "");
+  if (!/\bproject\s*\(/i.test(code)) return null;
+  const targets = [...code.matchAll(/\badd_executable\s*\(\s*([^\s()]+)([^)]*)\)/gi)]
+    .map((m) => ({ name: m[1], body: m[2] }))
+    .filter((t) => !t.name.includes("$"));
+  const file = basename(fileName).toLowerCase();
+  const listing = targets.filter((t) => t.body.split(/[\s"/\\]+/).some((w) => w.toLowerCase() === file));
+  if (listing.length === 1) return listing[0].name;
+  return targets.length === 1 ? targets[0].name : null;
+}
+
 export interface PlanInput {
   lang: Lang;
   /** Absolute path of the file to run (a temp copy for unsaved buffers). */
@@ -152,6 +207,9 @@ export interface PlanInput {
   custom?: string;
 }
 
+const CC_INSTALL =
+  'Install a compiler: on Windows Visual Studio Build Tools ("Desktop development with C++") or MinGW-w64 (e.g. via MSYS2); on macOS run `xcode-select --install`; on Linux install gcc (e.g. `sudo apt install build-essential`).';
+
 const INSTALL: Record<Lang, string> = {
   python: "Install Python from https://www.python.org (tick \"Add to PATH\"), or create a .venv next to your script.",
   javascript: "Install Node.js from https://nodejs.org (or Bun / Deno).",
@@ -160,6 +218,8 @@ const INSTALL: Record<Lang, string> = {
   java: "Install a JDK 11 or newer, e.g. from https://adoptium.net, and set JAVA_HOME.",
   csharp: "Install the .NET SDK from https://dotnet.microsoft.com/download.",
   rust: "Install Rust from https://rustup.rs.",
+  c: CC_INSTALL,
+  cpp: CC_INSTALL,
 };
 
 export const dirname = (p: string) => p.replace(/[\\/][^\\/]*$/, "") || p;
@@ -229,9 +289,16 @@ export function planRun(input: PlanInput): Plan {
   const dir = dirname(file);
 
   if (input.custom?.trim()) {
-    const [program, ...args] = expandTemplate(input.custom, file);
-    if (!program) return { error: "The custom run command is empty" };
-    return { steps: [{ program, args, cwd: dir, kind: "run" }] };
+    // `&&` chains commands (no shell involved): `g++ {file} -o {name} && ./{name}`.
+    const parts: string[][] = [[]];
+    for (const a of expandTemplate(input.custom, file)) {
+      if (a === "&&") parts.push([]);
+      else parts[parts.length - 1].push(a);
+    }
+    if (parts.some((p) => !p.length)) return { error: "The custom run command is empty or has an empty part around &&" };
+    return {
+      steps: parts.map(([program, ...args], i) => ({ program, args, cwd: dir, kind: i < parts.length - 1 ? "build" : "run" })),
+    };
   }
 
   const found = firstTool(input, toolsFor(lang, input.project));
@@ -360,5 +427,103 @@ export function planRun(input: PlanInput): Plan {
         ],
       };
     }
+
+    case "c":
+    case "cpp":
+      return planNative(input, found);
   }
+}
+
+/** C and C++: a CMake project's target, or the single file compiled into the run cache. */
+function planNative(input: PlanInput, found: [ToolKind, Tool] | null): Plan {
+  const { lang, file, project, cacheDir, windows } = input;
+  const dir = dirname(file);
+  const cpp = lang === "cpp";
+  const exeExt = windows ? ".exe" : "";
+
+  if (project.cmakeLists && project.cmakeTarget) {
+    if (!found) return { error: `CMake not found (needed for ${basename(project.cmakeLists)}). Install it from https://cmake.org.` };
+    const t = found[1];
+    const root = dirname(project.cmakeLists);
+    // Our own build folder (never the project's), with executables collected in one place so
+    // the run step finds them with every generator (multi-config ones would add Debug/).
+    const build = join(cacheDir, "cmake", `${safeName(basename(root))}_${hash(root)}`);
+    const out = join(build, "bin");
+    const target = project.cmakeTarget;
+    const configure = [
+      "-S",
+      root,
+      "-B",
+      build,
+      "-DCMAKE_BUILD_TYPE=Debug",
+      `-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=${out}`,
+      `-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG=${out}`,
+    ];
+    return {
+      steps: [
+        { ...toArgv(t, ...configure), cwd: root, kind: "build" },
+        { ...toArgv(t, "--build", build, "--target", target, "--config", "Debug"), cwd: root, kind: "build" },
+        { program: join(out, target + exeExt), args: [], cwd: dir, kind: "run" },
+      ],
+    };
+  }
+
+  if (!found) return { error: `No ${LANG_LABEL[lang]} compiler found. ${CC_INSTALL}` };
+  const [kind, t] = found;
+  const name = safeName(stem(file));
+  const exe = join(cacheDir, lang, name + exeExt);
+  // Compilers don't create the output folder; writing a file there does.
+  const files: WriteFile[] = [{ rel: `${lang}/obj/.keep`, content: "" }];
+
+  if (kind === "msvc") {
+    // `cl` only works after vcvars64.bat has set up its environment: a generated script does both.
+    const bat = (s: string) => s.replace(/%/g, "%%");
+    const script = [
+      "@echo off",
+      // vcvars prints harmless noise on stderr; report real failures ourselves. (No ( ) blocks:
+      // "Program Files (x86)" would end them.)
+      `call "${bat(t.program)}" >nul 2>&1 || goto vcvars_failed`,
+      `cl /nologo /utf-8 /EHsc /W4 ${cpp ? "/std:c++20 /Zc:__cplusplus" : "/std:c17"} /Fe"${bat(exe)}" /Fo"${bat(join(cacheDir, lang, "obj"))}\\\\" "${bat(file)}"`,
+      "exit /b %errorlevel%",
+      ":vcvars_failed",
+      `echo Setting up Visual C++ failed: "${bat(t.program)}" 1>&2`,
+      "exit /b 1",
+      "",
+    ].join("\r\n");
+    files.push({ rel: `${lang}/build_${name}.bat`, content: script });
+    return {
+      files,
+      steps: [
+        { program: join(cacheDir, lang, `build_${name}.bat`), args: [], cwd: dir, kind: "build" },
+        { program: exe, args: [], cwd: dir, kind: "run" },
+      ],
+    };
+  }
+
+  const args = [
+    cpp ? "-std=c++20" : "-std=c17",
+    "-Wall",
+    "-Wextra",
+    "-g",
+    "-fdiagnostics-color=never",
+    file,
+    "-o",
+    exe,
+    // libm is separate from libc on Linux.
+    ...(cpp || windows ? [] : ["-lm"]),
+  ];
+  return {
+    files,
+    steps: [
+      { ...toArgv(t, ...args), cwd: dir, kind: "build" },
+      { program: exe, args: [], cwd: dir, kind: "run" },
+    ],
+  };
+}
+
+/** Short stable hash of a path (one CMake build folder per project). */
+function hash(s: string): string {
+  let h = 0x811c9dc5;
+  for (const ch of s.replace(/\\/g, "/").toLowerCase()) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193);
+  return (h >>> 0).toString(16).padStart(8, "0");
 }

@@ -95,8 +95,9 @@ With text selected, JSON / XML / SQL formatting applies to the selection only. T
 | Java | `java File.java` single-file launch; needs Java 11+ (prefers `JAVA_HOME`, then the JDK owning `javac`, over an old Java on PATH) |
 | C# | `dotnet run --project` for a `.csproj`; `dotnet run file.cs` on .NET 10+; on older SDKs a throwaway project is generated |
 | Rust | `cargo run -q` in a Cargo project (`--bin` / `--example` from the file's location); a lone file is compiled with `rustc`, then run |
+| C / C++ | compiled to a temp executable, then run: `gcc` / `g++`, else `clang` / `clang++` (also from `Program Files\LLVM`), else Visual C++ (found via Visual Studio, set up with `vcvars64.bat`); C17 / C++20 with warnings on. In a CMake project (top-level `CMakeLists.txt` whose `add_executable` lists the file, or has just one) the target is built with CMake in a private build folder, then run. Headers (`.h`, `.hpp`) don't run |
 
-- Run → Set Run Command for This Language overrides the automatic choice, e.g. `node --inspect {file}` (`{file}`, `{dir}`, `{name}`, `{ext}`); Run → Re-detect Runtimes after installing a tool
+- Run → Set Run Command for This Language overrides the automatic choice, e.g. `node --inspect {file}` (`{file}`, `{dir}`, `{name}`, `{ext}`); chain build and run with `&&`, e.g. `g++ -O2 {file} -o {dir}/{name}.exe && {dir}/{name}.exe` (no shell is involved); Run → Re-detect Runtimes after installing a tool
 - Compiler errors and stack traces from every language are clickable (Python, Go, Rust, Node/TypeScript, Java, C# / MSBuild), including relative paths and errors in generated copies
 - Modified files are saved first; unsaved buffers run from a temp copy (traceback links still open the buffer)
 - Output panel streams stdout / stderr live, with an input box for `input()` and an EOF button; long output is capped at 2M characters

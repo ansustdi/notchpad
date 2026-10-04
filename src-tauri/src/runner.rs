@@ -518,7 +518,7 @@ pub fn probe_line(program: &str, args: &[&str]) -> Option<String> {
 /// Well-known install folders for tools that often aren't on PATH.
 fn extra_locations(name: &str) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
-    if name == "clang-format" {
+    if matches!(name, "clang-format" | "clang" | "clang++") {
         if cfg!(windows) {
             for var in ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"] {
                 if let Some(pf) = std::env::var_os(var) {
@@ -558,7 +558,31 @@ fn extra_locations(name: &str) -> Vec<PathBuf> {
     found
 }
 
-/// Find a runtime or build tool: node, deno, bun, tsx, go, java, dotnet, cargo, rustc — or a
+/// Visual C++ (Windows): not on PATH, so find Visual Studio with vswhere. `program` is its
+/// `vcvars64.bat`, which a generated build script calls to set up `cl`.
+fn detect_msvc() -> Option<Interpreter> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let pf = PathBuf::from(std::env::var_os("ProgramFiles(x86)")?);
+    let vswhere = pf.join("Microsoft Visual Studio").join("Installer").join("vswhere.exe");
+    let vswhere = vswhere.to_string_lossy();
+    let query = |prop: &str| {
+        probe_line(
+            &vswhere,
+            &["-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", prop],
+        )
+    };
+    let vcvars = PathBuf::from(query("installationPath")?).join("VC").join("Auxiliary").join("Build").join("vcvars64.bat");
+    if !vcvars.is_file() {
+        return None;
+    }
+    let version = query("catalog_productDisplayVersion").map_or("Visual C++".into(), |v| format!("Visual C++ (Visual Studio {v})"));
+    Some(runtime(vcvars, version, "Visual Studio"))
+}
+
+/// Find a runtime or build tool: node, deno, bun, tsx, go, java, dotnet, cargo, rustc, gcc, g++,
+/// clang, clang++, msvc, cmake — or a
 /// formatter: ruff, black, autopep8, gofmt, rustfmt, clang-format, prettier, google-java-format.
 /// `dir` is used for project-local tools (`node_modules/.bin/tsx`, `…/prettier`).
 pub fn detect_runtime(kind: &str, dir: Option<&Path>) -> Option<Interpreter> {
@@ -586,11 +610,15 @@ pub fn detect_runtime(kind: &str, dir: Option<&Path>) -> Option<Interpreter> {
         "prettier" => node_bin("prettier"),
         // gofmt has no version flag; it ships with Go, so finding it is enough.
         "gofmt" => which("gofmt").map(|p| runtime(p, "gofmt".into(), "PATH")),
-        "clang-format" => which("clang-format")
+        "clang-format" | "clang" | "clang++" => which(kind)
             .map(|p| (p, "PATH"))
             .into_iter()
-            .chain(extra_locations("clang-format").into_iter().map(|p| (p, "installed")))
+            .chain(extra_locations(kind).into_iter().map(|p| (p, "installed")))
             .find_map(|(p, src)| tool_version(&p, &["--version"]).map(|v| runtime(p, v, src))),
+        "gcc" => simple("gcc", &["--version"]),
+        "g++" => simple("g++", &["--version"]),
+        "cmake" => simple("cmake", &["--version"]),
+        "msvc" => detect_msvc(),
         "node" => simple("node", &["--version"]),
         "deno" => simple("deno", &["--version"]),
         "bun" => simple("bun", &["--version"]),
@@ -657,6 +685,12 @@ mod tests {
         assert!(cargo.is_file());
         assert!(which("definitely-not-a-real-tool-xyz").is_none());
         assert!(detect_runtime("cargo", None).is_some_and(|r| r.version.starts_with("cargo ")));
+        // C/C++ compilers, where installed: each one found must report a version.
+        for kind in ["gcc", "g++", "clang", "clang++", "msvc", "cmake"] {
+            if let Some(t) = detect_runtime(kind, None) {
+                assert!(!t.version.is_empty() && Path::new(&t.program).is_file(), "{kind}: {t:?}");
+            }
+        }
     }
 
     #[test]

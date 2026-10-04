@@ -22,6 +22,7 @@ import { useSettings } from "./settings";
 import { ask, askText, errorMessage, notify, showQuickPick } from "./ui";
 import {
   cargoPackageName,
+  cmakeTarget,
   DEFAULT_EXT,
   extOf,
   Lang,
@@ -296,6 +297,9 @@ export async function runActiveFile(tabId?: string) {
   if (pf && tab.path) project[pf.key] = await findUp(dir, pf.names);
   if (project.cargoToml) {
     project.cargoPackage = cargoPackageName((await openFile(project.cargoToml).catch(() => null))?.content ?? "");
+  }
+  if (project.cmakeLists) {
+    project.cmakeTarget = cmakeTarget((await openFile(project.cmakeLists).catch(() => null))?.content ?? "", path);
   }
 
   pending = [];
