@@ -16,8 +16,8 @@ import { refresh as refreshFolders, useWorkspace } from "./store/workspace";
 import { currentProjectName, openAnything, restoreProjectFolders } from "./store/project";
 import { commandForEvent, runCommand } from "./commands/registry";
 import { loadSettings } from "./store/settings";
-import { isModalOpen } from "./store/ui";
-import { newUntitled, setActiveGroup, useTabs } from "./store/tabs";
+import { askSave, isModalOpen } from "./store/ui";
+import { activate, newUntitled, saveTab, setActiveGroup, useTabs } from "./store/tabs";
 import { restoreSession, saveSessionNow } from "./session";
 import { startupFiles } from "./ipc";
 import { isMac } from "./platform";
@@ -40,6 +40,9 @@ async function init() {
 const TREE_KEYS = new Set(["F2", "Delete", "Enter", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"]);
 
 /** Browser shortcuts that make no sense in a desktop editor (reload, print, caret browsing…). */
+/** Commands whose keys still work while the terminal has focus. */
+const TERMINAL_PASSTHROUGH = new Set(["terminal.toggle", "terminal.new", "view.palette", "file.gotoAnything", "view.sidebar", "run.file"]);
+
 function isBrowserShortcut(e: KeyboardEvent): boolean {
   const mod = isMac ? e.metaKey : e.ctrlKey;
   const k = e.key.toLowerCase();
@@ -60,6 +63,12 @@ export default function App() {
       // The folder tree owns its navigation keys (F2 = rename there, not "next bookmark").
       if ((e.target as HTMLElement | null)?.closest?.(".sb-tree") && TREE_KEYS.has(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) return;
       const cmd = commandForEvent(e);
+      // The terminal gets every key (Ctrl+F, F2, … mean something to the shell) except a few.
+      if ((e.target as HTMLElement | null)?.closest?.(".term-host") && !(cmd && TERMINAL_PASSTHROUGH.has(cmd.id))) {
+        // Still no webview reload on F5 / Ctrl+R; xterm sees the key regardless.
+        if (import.meta.env.PROD && isBrowserShortcut(e)) e.preventDefault();
+        return;
+      }
       if (cmd) {
         e.preventDefault();
         e.stopPropagation();
@@ -78,7 +87,16 @@ export default function App() {
 
     const win = getCurrentWindow();
     const unlisteners = [
-      win.onCloseRequested(async () => {
+      win.onCloseRequested(async (event) => {
+        // Text buffers survive in the session; hex edits don't, so ask about those.
+        for (const tab of useTabs.getState().tabs.filter((t) => t.hex && t.dirty)) {
+          activate(tab.id);
+          const choice = await askSave(`Save changes to "${tab.title}"?`);
+          if (choice === "cancel" || (choice === "save" && !(await saveTab(tab.id)))) {
+            event.preventDefault();
+            return;
+          }
+        }
         await saveSessionNow();
       }),
       // A second launch ("Open with" while running) forwards its files here instead of opening a window.
@@ -107,7 +125,7 @@ export default function App() {
       const roots = useWorkspace.getState().roots;
       const name = currentProjectName();
       const project = name ? ` (${name})` : roots.length ? ` (${roots.map((r) => r.split(/[\\/]/).pop()).join(", ")})` : "";
-      const title = tab ? `${tab.dirty ? "● " : ""}${tab.path ?? tab.title}${project} - Text Editor` : "Text Editor";
+      const title = tab ? `${tab.dirty ? "● " : ""}${tab.path ?? tab.title}${project} - NotchPad` : "NotchPad";
       if (document.title !== title) {
         document.title = title;
         void win.setTitle(title);

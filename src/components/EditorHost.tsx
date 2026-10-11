@@ -8,6 +8,7 @@ import { useUi } from "../store/ui";
 import { toggleBookmark } from "../bookmarks";
 import { attachRecorder } from "../macro/macro";
 import { attachSmartHighlight } from "../smartHighlight";
+import { runCommand } from "../commands/registry";
 
 function publishCursor(editor: monaco.editor.IStandaloneCodeEditor) {
   const model = editor.getModel();
@@ -92,6 +93,13 @@ export function EditorHost({ groupId, hidden = false }: { groupId: string; hidde
       if (useTabs.getState().activeGroup === groupId) publishCursor(editor);
     };
     const subs = [
+      // A chord, which the app-wide key handler can't do; Monaco keeps its other Ctrl+K chords.
+      editor.addAction({
+        id: "app.markdown.previewSide",
+        label: "Markdown: Open Preview to the Side",
+        keybindings: [monaco.KeyMod.chord(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, monaco.KeyCode.KeyV)],
+        run: () => runCommand("markdown.previewSide"),
+      }),
       editor.onDidChangeCursorSelection(ifActive),
       editor.onDidChangeModel(ifActive),
       editor.onDidChangeModelOptions(ifActive),

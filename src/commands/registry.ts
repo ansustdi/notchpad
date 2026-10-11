@@ -60,6 +60,7 @@ function eventKey(e: KeyboardEvent): string {
   if (c.startsWith("Digit")) return c.slice(5);
   if (c === "Equal" || c === "NumpadAdd") return "=";
   if (c === "Minus" || c === "NumpadSubtract") return "-";
+  if (c === "Backquote") return "`";
   return e.key.toLowerCase();
 }
 

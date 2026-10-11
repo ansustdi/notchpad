@@ -3,6 +3,7 @@ import { readAppFile, writeAppFile } from "../ipc";
 import type { SavedMacro } from "../macro/macro";
 import type { Interpreter } from "../ipc";
 import type { SqlCase, SqlDialect, SqlLayout } from "../format/sql";
+import type { HexCharset, OffsetBase } from "../hex/format";
 
 export type ThemeSetting = "system" | "light" | "dark";
 
@@ -45,6 +46,13 @@ export interface Settings {
   /** Open project file (.sublime-project), restored at start; null = no project. */
   currentProject: string | null;
   recentProjects: string[];
+  /** Shell for the integrated terminal; empty = default (PowerShell on Windows, $SHELL elsewhere). */
+  terminalShell: string;
+  /** Hex editor display. */
+  hexBytesPerRow: number;
+  hexCharset: HexCharset;
+  hexOffsetBase: OffsetBase;
+  hexBigEndian: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -77,6 +85,11 @@ export const DEFAULT_SETTINGS: Settings = {
   confirmDragMove: true,
   currentProject: null,
   recentProjects: [],
+  terminalShell: "",
+  hexBytesPerRow: 16,
+  hexCharset: "ansi",
+  hexOffsetBase: "hex",
+  hexBigEndian: false,
 };
 
 interface SettingsState extends Settings {

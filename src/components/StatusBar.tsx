@@ -4,6 +4,8 @@ import { runCommand } from "../commands/registry";
 import { encodingLabel, pickEncodingAction, pickEol, pickLanguage } from "../commands";
 import { languageLabel } from "../monaco";
 import { useBig } from "../store/bigview";
+import { patchHex, selection, useHex } from "../store/hexview";
+import { formatOffset } from "../hex/format";
 import { useMacro } from "../macro/macro";
 import { runLangOf, useRun } from "../store/run";
 import { useSettings } from "../store/settings";
@@ -14,6 +16,8 @@ export function StatusBar() {
   const c = useUi((s) => s.cursor);
   const matches = useUi((s) => s.smartMatches);
   const big = useBig((s) => (tab ? s.views[tab.id] : undefined));
+  const hex = useHex((s) => (tab ? s.views[tab.id] : undefined));
+  const offsetBase = useSettings((s) => s.hexOffsetBase);
   const recording = useMacro((s) => s.recording);
   const playing = useMacro((s) => s.playing);
   const running = useRun((s) => s.running);
@@ -26,6 +30,33 @@ export function StatusBar() {
       </button>
     ) : null;
   if (!tab) return <div className="statusbar" />;
+  if (hex) {
+    const sel = selection(hex);
+    const fmt = (n: number) => formatOffset(n, offsetBase, 1) + (offsetBase === "hex" ? "h" : "");
+    return (
+      <div className="statusbar">
+        <div className="status-left">
+          <button onClick={() => runCommand("edit.gotoLine")} title="Go to offset (Ctrl+G)">
+            Offset: {fmt(hex.cursor)}
+            {sel && ` · Block: ${fmt(sel[0])}–${fmt(sel[1] - 1)} · Length: ${fmt(sel[1] - sel[0])}`}
+          </button>
+          {tab.path && (
+            <span className="status-path" title={tab.path}>
+              {tab.path}
+            </span>
+          )}
+        </div>
+        <div className="status-right">
+          {zoomBadge}
+          <button onClick={() => patchHex(tab.id, { insert: !hex.insert })} title="Insert / Overwrite (Insert key)">
+            {hex.insert ? "Insert" : "Overwrite"}
+          </button>
+          <span>{hex.len.toLocaleString()} bytes</span>
+          <span>Hex</span>
+        </div>
+      </div>
+    );
+  }
   if (big) {
     return (
       <div className="statusbar">

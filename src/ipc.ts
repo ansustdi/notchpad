@@ -119,7 +119,7 @@ export interface BigFound {
 }
 
 /** [size in bytes, needs big-file mode] */
-export const probeFile = (path: string) => invoke<[number, boolean]>("probe_file", { path });
+export const probeFile = (path: string) => invoke<[number, boolean, boolean]>("probe_file", { path });
 
 export const bigfileOpen = (path: string) => invoke<BigOpened>("bigfile_open", { path });
 
@@ -217,3 +217,44 @@ export const fsCopy = (from: string, to: string) => invoke<void>("fs_copy", { fr
 /** Moves to the Recycle Bin / Trash. */
 export const fsTrash = (path: string) => invoke<void>("fs_trash", { path });
 export const fsReveal = (path: string) => invoke<void>("fs_reveal", { path });
+
+// ---- Integrated terminal
+
+export interface TermOutput {
+  id: number;
+  data: string;
+}
+
+export interface TermExit {
+  id: number;
+  code: number;
+}
+
+/** Start a shell in a PTY; `shell` null = the user's default. Resolves to the shell's path. */
+export const termSpawn = (id: number, shell: string | null, cwd: string, cols: number, rows: number) =>
+  invoke<string>("term_spawn", { id, shell, cwd, cols, rows });
+export const termWrite = (id: number, data: string) => invoke<void>("term_write", { id, data });
+export const termResize = (id: number, cols: number, rows: number) => invoke<void>("term_resize", { id, cols, rows });
+export const termKill = (id: number) => invoke<void>("term_kill", { id });
+
+/** Local image as a data: URL (Markdown preview). */
+export const readImageDataUrl = (path: string) => invoke<string>("read_image_data_url", { path });
+
+// ---- Hex editor
+
+export interface HexChecksum {
+  name: string;
+  value: string;
+}
+
+export const hexOpen = (path: string | null) => invoke<{ id: number; len: number }>("hex_open", { path });
+export const hexRead = async (id: number, offset: number, len: number) =>
+  new Uint8Array(await invoke<ArrayBuffer>("hex_read", { id, offset, len }));
+/** `removed` is null when more than `keepLimit` bytes were removed (too big to send back). */
+export const hexReplace = (id: number, offset: number, del: number, bytes: Uint8Array, keepLimit: number) =>
+  invoke<{ removed: number[] | null; len: number }>("hex_replace", { id, offset, del, bytes: Array.from(bytes), keepLimit });
+export const hexSave = (id: number, path: string) => invoke<void>("hex_save", { id, path });
+export const hexFind = (id: number, pattern: Uint8Array, from: number, backwards: boolean, ignoreCase: boolean) =>
+  invoke<number | null>("hex_find", { id, pattern: Array.from(pattern), from, backwards, ignoreCase });
+export const hexChecksums = (id: number, offset: number, len: number) => invoke<HexChecksum[]>("hex_checksums", { id, offset, len });
+export const hexClose = (id: number) => invoke<void>("hex_close", { id });

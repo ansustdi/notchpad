@@ -51,6 +51,8 @@ import {
   toggleRecording,
 } from "../macro/macro";
 import { bigReveal } from "../store/bigview";
+import { killTerminal, newTerminal, toggleTerminal } from "../store/terminal";
+import { toggleMdMode } from "../store/markdown";
 import {
   activeTab,
   closeOthers,
@@ -76,7 +78,13 @@ import {
   setEol,
   setLanguage,
   setSaveEncoding,
+  openHex,
+  reopenInHex,
+  reopenAsText,
 } from "../store/tabs";
+import { computeChecksums, hexUndo } from "../store/hexview";
+import { focusHexSearch, hexGoto } from "../components/HexView";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 
 export const ENCODINGS: { id: string; label: string; encoding: string; bom: boolean }[] = [
   { id: "utf8", label: "UTF-8", encoding: "UTF-8", bom: false },
@@ -198,8 +206,29 @@ export function openPalette() {
   });
 }
 
+/** Id of the active tab when it's a hex document. */
+const activeHex = () => {
+  const tab = activeTab();
+  return tab?.hex ? tab.id : null;
+};
+
+/** Run `hex` for a hex tab, else `other` (Monaco). */
+const hexOr = (hex: (id: string) => unknown, other: () => unknown) => () => {
+  const id = activeHex();
+  return id ? hex(id) : other();
+};
+
+async function openFileInHex() {
+  const picked = await openFileDialog({ multiple: true, directory: false, defaultPath: activeTab()?.path ?? undefined });
+  if (!picked) return;
+  for (const path of Array.isArray(picked) ? picked : [picked]) {
+    await openHex(path).catch((e) => notify(String(e), "error"));
+  }
+}
+
 function gotoLine() {
   const tab = activeTab();
+  if (tab?.hex) return hexGoto(tab.id);
   if (!tab?.big) return runEditorAction("editor.action.gotoLine");
   askText("Go to line (big file)", (text) => {
     const n = Number(text.replace(/[,_\s]/g, ""));
@@ -288,9 +317,9 @@ registerCommands([
   { id: "tab.prev", label: "Previous Tab", keys: "Ctrl+Shift+Tab", run: () => cycleTab(-1), hidden: true },
 
   // Edit (delegated to Monaco actions)
-  { id: "edit.undo", category: "Edit", label: "Undo", run: () => runEditorAction("undo"), hidden: true },
-  { id: "edit.redo", category: "Edit", label: "Redo", run: () => runEditorAction("redo"), hidden: true },
-  { interactive: true, id: "edit.find", category: "Edit", label: "Find", run: () => runEditorAction("actions.find") },
+  { id: "edit.undo", category: "Edit", label: "Undo", run: hexOr((id) => hexUndo(id), () => runEditorAction("undo")), hidden: true },
+  { id: "edit.redo", category: "Edit", label: "Redo", run: hexOr((id) => hexUndo(id, true), () => runEditorAction("redo")), hidden: true },
+  { interactive: true, id: "edit.find", category: "Edit", label: "Find", run: hexOr(focusHexSearch, () => runEditorAction("actions.find")) },
   { interactive: true, id: "edit.replace", category: "Edit", label: "Replace", run: () => runEditorAction("editor.action.startFindReplaceAction") },
   { interactive: true, id: "edit.gotoLine", category: "Edit", label: "Go to Line…", keys: "Mod+G", run: gotoLine },
   { id: "edit.toggleComment", category: "Edit", label: "Toggle Line Comment", run: () => runEditorAction("editor.action.commentLine") },
@@ -389,6 +418,22 @@ registerCommands([
     label: "Show / Hide Output",
     run: () => (useRun.getState().open ? closeOutput() : openOutput()),
   },
+
+  // Markdown preview (VS Code keys; Ctrl+K V is bound inside Monaco, see EditorHost)
+  { id: "markdown.preview", category: "Markdown", label: "Toggle Markdown Preview", keys: "Mod+Shift+V", run: () => toggleMdMode("preview") },
+  { id: "markdown.previewSide", category: "Markdown", label: "Open Markdown Preview to the Side", run: () => toggleMdMode("side") },
+
+  // Hex editor (HxD style)
+  { interactive: true, id: "hex.openFile", category: "Hex", label: "Open File in Hex Editor…", run: openFileInHex },
+  { id: "hex.reopen", category: "Hex", label: "Reopen Active File in Hex Editor", run: () => reopenInHex() },
+  { id: "hex.asText", category: "Hex", label: "Reopen Hex Document as Text", run: () => reopenAsText() },
+  { id: "hex.new", category: "Hex", label: "New Hex Document", run: () => openHex(null) },
+  { id: "hex.checksums", category: "Hex", label: "Checksums (CRC-32, MD5, SHA…)", run: hexOr(computeChecksums, () => notify("Checksums work on hex documents")) },
+
+  // Integrated terminal (VS Code keys; Ctrl even on macOS, like VS Code)
+  { id: "terminal.toggle", category: "Terminal", label: "Toggle Terminal", keys: "Ctrl+`", run: toggleTerminal },
+  { id: "terminal.new", category: "Terminal", label: "New Terminal", keys: "Ctrl+Shift+`", run: newTerminal },
+  { id: "terminal.kill", category: "Terminal", label: "Kill Terminal", run: () => killTerminal() },
 
   // Macros (Notepad++ style)
   { id: "macro.record", category: "Macro", label: "Start / Stop Recording", keys: "Mod+Shift+R", run: toggleRecording },

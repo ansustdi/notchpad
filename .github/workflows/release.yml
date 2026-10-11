@@ -56,14 +56,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          releaseName: "Text Editor ${{ github.ref_name }}"
+          releaseName: "NotchPad ${{ github.ref_name }}"
           releaseDraft: true
           args: ${{ matrix.args }}
 
       # Manual runs (no tag) create no release: keep the installers as downloadable artifacts.
       - uses: actions/upload-artifact@v4
         with:
-          name: text-editor-${{ matrix.platform }}
+          name: notchpad-${{ matrix.platform }}
           path: |
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*.exe

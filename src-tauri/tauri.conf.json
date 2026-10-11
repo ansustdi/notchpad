@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Text Editor",
-  "version": "0.1.0",
-  "identifier": "com.simple.texteditor",
+  "productName": "NotchPad",
+  "version": "0.2.0",
+  "identifier": "com.notchpad.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Text Editor",
+        "title": "NotchPad",
         "width": 1200,
         "height": 800,
         "minWidth": 480,
@@ -37,5 +37,5 @@
       "icons/icon.ico"
     ]
   },
-  "mainBinaryName": "text-editor"
+  "mainBinaryName": "notchpad"
 }

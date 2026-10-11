@@ -16,6 +16,8 @@ import {
   togglePin,
   makePermanent,
   useTabs,
+  reopenInHex,
+  reopenAsText,
 } from "../store/tabs";
 import { notify, showQuickPick } from "../store/ui";
 
@@ -27,7 +29,8 @@ function tabMenu(tab: Tab, groupId: string) {
     { id: "all", label: "Close All" },
     { id: "pin", label: tab.pinned ? "Unpin" : "Pin" },
     { id: "move", label: "Move to Other Group" },
-    ...(tab.big ? [] : [{ id: "clone", label: "Clone to Other Group" }]),
+    ...(tab.big || tab.hex ? [] : [{ id: "clone", label: "Clone to Other Group" }]),
+    ...(tab.hex ? (tab.path ? [{ id: "asText", label: "Open as Text" }] : []) : tab.path ? [{ id: "hex", label: "Open in Hex Editor" }] : []),
     ...(tab.path ? [{ id: "copyPath", label: "Copy Full Path", detail: tab.path }] : []),
     { id: "copyName", label: "Copy File Name" },
   ];
@@ -48,6 +51,10 @@ function tabMenu(tab: Tab, groupId: string) {
           return togglePin(tab.id);
         case "move":
           return moveToGroup(tab.id, groupId, otherGroup(groupId));
+        case "hex":
+          return void reopenInHex(tab.id);
+        case "asText":
+          return void reopenAsText(tab.id);
         case "clone":
           return cloneToGroup(tab.id, groupId, otherGroup(groupId));
         default: {

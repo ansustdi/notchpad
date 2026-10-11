@@ -1,9 +1,11 @@
 mod bigfile;
 mod file_io;
 mod fsops;
+mod hexdoc;
 mod runner;
 mod search;
 mod session;
+mod terminal;
 
 use file_io::{OpenedFile, SaveRequest};
 use search::{ReplaceSummary, SearchRequest};
@@ -197,6 +199,184 @@ fn run_find_up(dir: String, names: Vec<String>) -> Option<String> {
     runner::find_up(Path::new(&dir), &names).map(|p| p.to_string_lossy().into_owned())
 }
 
+// ---- Integrated terminal
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct TermOutput {
+    id: u64,
+    data: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct TermExit {
+    id: u64,
+    code: u32,
+}
+
+/// Start a shell (`shell`, or the user's default) in a PTY. Output streams as `term-output`,
+/// then one `term-exit`. Returns the shell's path.
+#[tauri::command]
+fn term_spawn(
+    app: AppHandle,
+    terms: State<'_, terminal::Terminals>,
+    id: u64,
+    shell: Option<String>,
+    cwd: String,
+    cols: u16,
+    rows: u16,
+) -> Result<String, String> {
+    let shell = shell.filter(|s| !s.trim().is_empty()).unwrap_or_else(terminal::default_shell);
+    let out_app = app.clone();
+    terms.spawn(
+        id,
+        &shell,
+        Path::new(&cwd),
+        cols,
+        rows,
+        move |data| {
+            let _ = out_app.emit("term-output", TermOutput { id, data });
+        },
+        move |code| {
+            app.state::<terminal::Terminals>().forget(id);
+            let _ = app.emit("term-exit", TermExit { id, code });
+        },
+    )?;
+    Ok(shell)
+}
+
+#[tauri::command]
+fn term_write(terms: State<'_, terminal::Terminals>, id: u64, data: String) -> Result<(), String> {
+    terms.write(id, &data)
+}
+
+#[tauri::command]
+fn term_resize(terms: State<'_, terminal::Terminals>, id: u64, cols: u16, rows: u16) -> Result<(), String> {
+    terms.resize(id, cols, rows)
+}
+
+#[tauri::command]
+fn term_kill(terms: State<'_, terminal::Terminals>, id: u64) {
+    terms.kill(id);
+}
+
+/// A local image as a `data:` URL, for the Markdown preview (the webview can't load file paths).
+#[tauri::command]
+async fn read_image_data_url(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || file_io::image_data_url(Path::new(&path)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+// ---- Hex editor
+
+#[derive(Default)]
+struct HexDocs {
+    next: AtomicU64,
+    open: Mutex<HashMap<u64, Arc<Mutex<hexdoc::HexDoc>>>>,
+}
+
+impl HexDocs {
+    fn get(&self, id: u64) -> Result<Arc<Mutex<hexdoc::HexDoc>>, String> {
+        self.open.lock().unwrap().get(&id).cloned().ok_or_else(|| "document is no longer open".into())
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HexOpened {
+    id: u64,
+    len: u64,
+}
+
+/// Open `path` (or a new empty document) for hex editing.
+#[tauri::command]
+async fn hex_open(state: State<'_, HexDocs>, path: Option<String>) -> Result<HexOpened, String> {
+    let doc = tauri::async_runtime::spawn_blocking(move || hexdoc::HexDoc::open(path.as_deref().map(Path::new)))
+        .await
+        .map_err(|e| e.to_string())??;
+    let id = state.next.fetch_add(1, Ordering::SeqCst) + 1;
+    let len = doc.len();
+    state.open.lock().unwrap().insert(id, Arc::new(Mutex::new(doc)));
+    Ok(HexOpened { id, len })
+}
+
+/// Raw bytes (an ArrayBuffer on the JS side).
+#[tauri::command]
+async fn hex_read(state: State<'_, HexDocs>, id: u64, offset: u64, len: u64) -> Result<tauri::ipc::Response, String> {
+    let doc = state.get(id)?;
+    let bytes = tauri::async_runtime::spawn_blocking(move || doc.lock().unwrap().read(offset, len.min(16 << 20)))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HexReplaced {
+    /// None when more than `keep_limit` bytes went (too big to send back for undo).
+    removed: Option<Vec<u8>>,
+    len: u64,
+}
+
+/// Replace `del` bytes at `offset` with `bytes`; returns what was removed and the new length.
+#[tauri::command]
+async fn hex_replace(
+    state: State<'_, HexDocs>,
+    id: u64,
+    offset: u64,
+    del: u64,
+    bytes: Vec<u8>,
+    keep_limit: u64,
+) -> Result<HexReplaced, String> {
+    let doc = state.get(id)?;
+    // Off the main thread: a running find / checksum holds the lock for a while.
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut doc = doc.lock().unwrap();
+        let removed = doc.replace(offset, del, &bytes, keep_limit)?;
+        Ok(HexReplaced { removed, len: doc.len() })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn hex_save(state: State<'_, HexDocs>, id: u64, path: String) -> Result<(), String> {
+    let doc = state.get(id)?;
+    tauri::async_runtime::spawn_blocking(move || doc.lock().unwrap().save(Path::new(&path)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn hex_find(
+    state: State<'_, HexDocs>,
+    id: u64,
+    pattern: Vec<u8>,
+    from: u64,
+    backwards: bool,
+    ignore_case: bool,
+) -> Result<Option<u64>, String> {
+    let doc = state.get(id)?;
+    tauri::async_runtime::spawn_blocking(move || doc.lock().unwrap().find(&pattern, from, backwards, ignore_case))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn hex_checksums(state: State<'_, HexDocs>, id: u64, offset: u64, len: u64) -> Result<Vec<hexdoc::Checksum>, String> {
+    let doc = state.get(id)?;
+    tauri::async_runtime::spawn_blocking(move || doc.lock().unwrap().checksums(offset, len))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn hex_close(state: State<'_, HexDocs>, id: u64) {
+    state.open.lock().unwrap().remove(&id);
+}
+
 // ---- Folders (sidebar, Goto Anything)
 
 #[tauri::command]
@@ -294,11 +474,11 @@ fn spawn_indexer(app: AppHandle, id: u64, bf: Arc<BigFile>) {
     });
 }
 
-/// Size in bytes and whether the file must use big-file mode.
+/// Size in bytes, whether the file must use big-file mode, and whether it looks binary.
 #[tauri::command]
-fn probe_file(path: String) -> Result<(u64, bool), String> {
+fn probe_file(path: String) -> Result<(u64, bool, bool), String> {
     let len = std::fs::metadata(&path).map_err(|e| format!("{path}: {e}"))?.len();
-    Ok((len, len > file_io::MAX_EDITOR_FILE_SIZE))
+    Ok((len, len > file_io::MAX_EDITOR_FILE_SIZE, file_io::file_looks_binary(Path::new(&path))))
 }
 
 #[tauri::command]
@@ -406,6 +586,33 @@ fn clean_path(p: std::path::PathBuf) -> String {
     s.strip_prefix(r"\\?\").map(str::to_owned).unwrap_or(s)
 }
 
+/// The app was called "Text Editor" (id `com.simple.texteditor`) before 0.2.0. Copy its settings,
+/// session and projects over once, so renaming doesn't lose open tabs or unsaved buffers.
+fn migrate_old_app_data(app: &AppHandle) {
+    let Ok(new_dir) = app.path().app_data_dir() else { return };
+    let Some(old_dir) = new_dir.parent().map(|p| p.join("com.simple.texteditor")) else { return };
+    if new_dir.exists() || !old_dir.is_dir() {
+        return;
+    }
+    if let Err(e) = copy_dir(&old_dir, &new_dir) {
+        eprintln!("migrating {} failed: {e}", old_dir.display());
+    }
+}
+
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -416,7 +623,7 @@ pub fn run() {
         use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
         let app_menu = Submenu::with_items(
             app,
-            "Text Editor",
+            "NotchPad",
             true,
             &[
                 &PredefinedMenuItem::about(app, None, None)?,
@@ -451,8 +658,15 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            migrate_old_app_data(app.handle());
+            Ok(())
+        })
         .manage(BigFiles::default())
         .manage(runner::Runs::default())
+        .manage(terminal::Terminals::default())
+        .manage(HexDocs::default())
         .invoke_handler(tauri::generate_handler![
             open_file,
             save_file,
@@ -479,6 +693,18 @@ pub fn run() {
             run_find_up,
             format_pipe,
             run_probe,
+            term_spawn,
+            term_write,
+            term_resize,
+            term_kill,
+            read_image_data_url,
+            hex_open,
+            hex_read,
+            hex_replace,
+            hex_save,
+            hex_find,
+            hex_checksums,
+            hex_close,
             fs_list_dir,
             fs_list_files,
             fs_stat,
@@ -495,6 +721,7 @@ pub fn run() {
             // Don't leave scripts running after the editor quits.
             if let tauri::RunEvent::Exit = event {
                 app.state::<runner::Runs>().kill_all();
+                app.state::<terminal::Terminals>().kill_all();
             }
         });
 }

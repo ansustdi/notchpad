@@ -1,6 +1,8 @@
-# Text Editor
+# NotchPad
 
-Cross-platform (Windows / macOS / Linux) text editor built with Tauri 2, React and Monaco.
+A notch above Notepad: a cross-platform (Windows / macOS / Linux) text and hex editor built with Tauri 2, React and Monaco.
+
+Current version: **0.2.0** (see [Changelog](#changelog)).
 
 ## Features (MVP)
 
@@ -104,6 +106,28 @@ With text selected, JSON / XML / SQL formatting applies to the selection only. T
 - Stop kills the whole process tree (child processes too); closing the editor stops running programs
 - Programs run in the file's folder; Python gets `PYTHONUNBUFFERED=1` and `PYTHONIOENCODING=utf-8` (the Windows Store `python.exe` stub is skipped)
 
+## Integrated terminal
+
+- `` Ctrl+` `` shows / hides the terminal (and focuses it); `` Ctrl+Shift+` `` opens another shell. Hiding the panel keeps shells running
+- A real pseudo-terminal (ConPTY on Windows): PowerShell 7, Windows PowerShell or cmd on Windows, `$SHELL` elsewhere; set `terminalShell` in settings to choose
+- Starts in the first side bar folder (else the active file's folder, else home); several shells with a list to switch, kill or restart them
+- Keys go to the shell (Ctrl+F, Ctrl+R, …) except `` Ctrl+` ``, `Ctrl+Shift+P`, `Ctrl+P`, `Ctrl+B` and `F5`. `Ctrl+C` copies when text is selected, else interrupts; `Ctrl+V` pastes
+
+## Markdown preview
+
+- Markdown tabs get an **Edit | Split | Preview** switch at the end of the tab bar; `Ctrl+Shift+V` toggles the preview, `Ctrl+K V` opens it to the side
+- GitHub-style rendering: tables, task lists, front matter, heading anchors; code blocks highlighted by Monaco; updates live while typing and follows the editor's scroll position in split mode
+- Local images (relative to the file), `#anchor` links, web links in the browser, links to other `.md` files open as tabs. HTML is sanitized
+
+## Hex editor (HxD style)
+
+- Binary files open in the hex editor automatically; Tools → Hex Editor opens any file (or a new empty document) in hex; tab menu: Open in Hex Editor / Open as Text
+- Any file size opens instantly (piece table over the file: only what is shown is read); insert / overwrite (`Insert` key), delete, cut / copy / paste as hex or text, undo / redo, atomic save
+- Offset, hex and decoded-text columns; bytes per row is any number (1–4096), Windows (ANSI) or ASCII text, hex or decimal offsets; wide rows scroll sideways
+- Find hex bytes or text (`Ctrl+F`, `F3` / `Shift+F3`), Go to offset (`Ctrl+G`; `0x`/`h` hex, `#` decimal, `+`/`-` relative)
+- Data inspector (8–64 bit integers, floats, binary, characters, Unix time; little / big endian) and checksums (Checksum-8, CRC-32, MD5, SHA-1, SHA-256, SHA-512) of the selection or the whole file
+- Smooth wheel scrolling; `Ctrl+Up` / `Ctrl+Down` scroll without moving the caret
+
 ## Development
 
 Prerequisites: Node 22+, Rust stable, and on Linux `libwebkit2gtk-4.1-dev librsvg2-dev`.
@@ -133,6 +157,9 @@ Installers are built per OS; `.github/workflows/release.yml` builds all three on
 - `src/macro/` — macro recorder and player
 - `src-tauri/src/runner.rs`, `src/store/run.ts`, `src/components/OutputPanel.tsx` — running scripts
 - `src/commands/` — commands, keybindings, pickers
+- `src-tauri/src/terminal.rs`, `src/store/terminal.ts`, `src/components/TerminalPanel.tsx` — integrated terminal
+- `src/markdown/`, `src/components/MarkdownPreview.tsx` — Markdown preview
+- `src-tauri/src/hexdoc.rs`, `src/store/hexview.ts`, `src/components/HexView.tsx`, `src/hex/` — hex editor
 
 ## Roadmap
 
@@ -140,3 +167,18 @@ Installers are built per OS; `.github/workflows/release.yml` builds all three on
 2. ~~Big-file mode, tail/follow~~ (done)
 3. ~~Split view and tab groups~~ (done)
 4. ~~Tools: JSON/XML format, diff, macros~~ (done)
+
+## Changelog
+
+### 0.2.0
+
+- Renamed to **NotchPad** (settings, session and projects of the old "Text Editor" are carried over on first start)
+- Menus cut from 10 to 6 (File, Edit, Search, View, Run, Tools) with submenus
+- Integrated terminal (`` Ctrl+` ``)
+- Markdown preview (`Ctrl+Shift+V`, `Ctrl+K V`)
+- HxD-style hex editor with data inspector, search and checksums
+- Run C and C++ files (gcc / clang / MSVC, CMake projects)
+
+### 0.1.0
+
+- First version: tabs and sessions, search, big files, split view, tools, macros, formatting, running code, folders and projects

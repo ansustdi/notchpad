@@ -73,6 +73,28 @@ pub fn decode(bytes: &[u8]) -> Decoded {
     Decoded { content: text.into_owned(), encoding: enc, has_bom: false, had_errors }
 }
 
+/// Binary (not text) judging by the first bytes: NULs that aren't UTF-16 / UTF-32 text.
+pub fn looks_binary(head: &[u8]) -> bool {
+    if Encoding::for_bom(head).is_some() || head.starts_with(&[0xFF, 0xFE, 0, 0]) || head.starts_with(&[0, 0, 0xFE, 0xFF]) {
+        return false;
+    }
+    head.contains(&0) && guess_utf16_without_bom(head).is_none()
+}
+
+/// The first 8 KB of `path` look binary.
+pub fn file_looks_binary(path: &Path) -> bool {
+    let mut head = [0u8; 8192];
+    let Ok(mut f) = fs::File::open(path) else { return false };
+    let mut n = 0;
+    while n < head.len() {
+        match std::io::Read::read(&mut f, &mut head[n..]) {
+            Ok(0) | Err(_) => break,
+            Ok(k) => n += k,
+        }
+    }
+    looks_binary(&head[..n])
+}
+
 /// BOM-less UTF-16 is common on Windows; detect it by NUL byte placement in ASCII-heavy text.
 fn guess_utf16_without_bom(bytes: &[u8]) -> Option<&'static Encoding> {
     let sample = &bytes[..bytes.len().min(4096) & !1];
@@ -200,9 +222,73 @@ pub fn save(req: &SaveRequest) -> Result<(), String> {
     atomic_write(Path::new(&req.path), &bytes).map_err(|e| format!("{}: {e}", req.path))
 }
 
+/// Largest image the Markdown preview inlines.
+const MAX_IMAGE_SIZE: u64 = 20 * 1024 * 1024;
+
+/// `path` as a `data:` URL. Only image types, so this can't be used to read arbitrary files.
+pub fn image_data_url(path: &Path) -> Result<String, String> {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        "avif" => "image/avif",
+        _ => return Err(format!("not an image: {}", path.display())),
+    };
+    let len = fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?.len();
+    if len > MAX_IMAGE_SIZE {
+        return Err(format!("image too large: {}", path.display()));
+    }
+    let bytes = fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(format!("data:{mime};base64,{}", base64(&bytes)))
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = (chunk[0] as u32) << 16 | (*chunk.get(1).unwrap_or(&0) as u32) << 8 | *chunk.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(ABC[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base64_matches_rfc4648() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn binary_detection() {
+        assert!(looks_binary(b"MZ\x90\x00\x03\x00\x00\x00"));
+        assert!(!looks_binary(b"plain text\r\n"));
+        assert!(!looks_binary(b"h\x00e\x00l\x00l\x00o\x00 \x00w\x00o\x00r\x00l\x00d\x00"));
+        assert!(!looks_binary(b"\xFF\xFEh\x00i\x00"));
+        assert!(!looks_binary(b""));
+    }
+
+    #[test]
+    fn image_data_url_rejects_non_images() {
+        assert!(image_data_url(Path::new("Cargo.toml")).is_err());
+    }
 
     #[test]
     fn utf8_plain_and_bom() {

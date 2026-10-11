@@ -1,12 +1,18 @@
 import { Fragment, useRef } from "react";
 import { EditorHost } from "./EditorHost";
 import { BigFileView } from "./BigFileView";
+import { HexView } from "./HexView";
 import { TabBar } from "./TabBar";
+import { MarkdownPreview } from "./MarkdownPreview";
+import { MdMode, setMdMode, useMdPreview } from "../store/markdown";
 import { Group, setActiveGroup, setGroupSizes, useTabs } from "../store/tabs";
 
 function EditorGroup({ group, single, grow }: { group: Group; single: boolean; grow: number }) {
   const isActive = useTabs((s) => s.activeGroup === group.id);
   const bigTab = useTabs((s) => s.tabs.find((t) => t.id === group.activeId && t.big));
+  const hexTabId = useTabs((s) => (s.tabs.find((t) => t.id === group.activeId)?.hex ? group.activeId : null));
+  const mdTabId = useTabs((s) => (s.tabs.find((t) => t.id === group.activeId && !t.big && !t.hex)?.language === "markdown" ? group.activeId : null));
+  const mdMode = useMdPreview((s) => (mdTabId ? s.modes[mdTabId] : undefined));
   return (
     <section
       className={`editor-group${isActive && !single ? " active" : ""}`}
@@ -16,12 +22,42 @@ function EditorGroup({ group, single, grow }: { group: Group; single: boolean; g
       onPointerDownCapture={() => setActiveGroup(group.id)}
       aria-label="Editor group"
     >
-      <TabBar groupId={group.id} />
-      <div className="editor-area">
-        <EditorHost groupId={group.id} hidden={!!bigTab} />
+      <div className="group-head">
+        <TabBar groupId={group.id} />
+        {mdTabId && <MdModeSwitch tabId={mdTabId} mode={mdMode} />}
+      </div>
+      <div className={`editor-area${mdMode === "side" ? " md-split" : ""}`}>
+        <EditorHost groupId={group.id} hidden={!!bigTab || !!hexTabId || mdMode === "preview"} />
+        {hexTabId && <HexView key={hexTabId} tabId={hexTabId} />}
         {bigTab && <BigFileView key={bigTab.id} tabId={bigTab.id} title={bigTab.title} />}
+        {mdTabId && mdMode && <MarkdownPreview key={mdTabId} tabId={mdTabId} groupId={group.id} side={mdMode === "side"} />}
       </div>
     </section>
+  );
+}
+
+/** Editor / side-by-side / preview switch shown for Markdown tabs. */
+function MdModeSwitch({ tabId, mode }: { tabId: string; mode: MdMode | undefined }) {
+  const opts: { mode: MdMode | null; label: string; title: string }[] = [
+    { mode: null, label: "Edit", title: "Editor only" },
+    { mode: "side", label: "Split", title: "Preview to the side (Ctrl+K V)" },
+    { mode: "preview", label: "Preview", title: "Preview only (Ctrl+Shift+V)" },
+  ];
+  return (
+    <div className="md-switch" role="radiogroup" aria-label="Markdown view">
+      {opts.map((o) => (
+        <button
+          key={o.label}
+          role="radio"
+          aria-checked={(mode ?? null) === o.mode}
+          className={(mode ?? null) === o.mode ? "on" : ""}
+          title={o.title}
+          onClick={() => setMdMode(tabId, o.mode)}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
   );
 }
 

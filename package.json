@@ -1,7 +1,7 @@
 {
-  "name": "text-editor",
+  "name": "notchpad",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,10 +11,14 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2",
+    "@tauri-apps/api": "~2.12.0",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.3",
     "@tauri-apps/plugin-dialog": "^2.7.3",
-    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-opener": "~2.7.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "dompurify": "^3.4.16",
+    "marked": "^18.1.0",
     "monaco-editor": "^0.57.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

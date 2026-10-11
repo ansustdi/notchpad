@@ -1,8 +1,9 @@
 import { create } from "zustand";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { monaco, languageForPath, PLAINTEXT } from "../monaco";
-import { bigfileClose, bigfileOpen, Eol, openFile, probeFile, saveFile } from "../ipc";
+import { bigfileClose, bigfileOpen, Eol, hexClose, hexOpen, openFile, probeFile, saveFile } from "../ipc";
 import { getBigView, registerBig, unregisterBig } from "./bigview";
+import { getHexView, registerHex, saveHexDoc, unregisterHex } from "./hexview";
 import { baseName, samePath } from "../platform";
 import { askSave, errorMessage, notify } from "./ui";
 import { useSettings } from "./settings";
@@ -20,6 +21,8 @@ export interface Tab {
   dirty: boolean;
   /** Read-only big-file viewer tab (no Monaco model). */
   big?: boolean;
+  /** Hex editor tab (bytes, no Monaco model). */
+  hex?: boolean;
   /** Pinned tabs sit at the left and survive "Close Others / All". */
   pinned?: boolean;
   /**
@@ -134,6 +137,11 @@ function patchTab(id: string, patch: Partial<Tab>) {
   scheduleSessionSave();
 }
 
+/** Dirty flag for documents without a Monaco model (hex tabs). */
+export function setTabDirty(id: string, dirty: boolean) {
+  if (getTab(id) && getTab(id)!.dirty !== dirty) patchTab(id, { dirty });
+}
+
 function refreshDirty(id: string) {
   const model = models.get(id);
   const tab = getTab(id);
@@ -229,6 +237,35 @@ export async function openBig(path: string, opts: { id?: string; top?: number; p
     eol: "LF",
     dirty: false,
     big: true,
+    preview: opts.preview || undefined,
+  };
+  useTabs.setState((s) => ({ tabs: [...s.tabs, tab] }));
+  if (opts.group !== null) placeInGroup(opts.group ?? useTabs.getState().activeGroup, id, opts.activate ?? true, opts.index);
+  scheduleSessionSave();
+  return tab;
+}
+
+/** Open `path` (null = a new empty document) in the hex editor. */
+export async function openHex(path: string | null, opts: { id?: string; top?: number; cursor?: number; preview?: boolean } & Placement = {}): Promise<Tab> {
+  const opened = await hexOpen(path);
+  const id = opts.id ?? newId();
+  registerHex(id, opened.id, opened.len, opts.top ?? 0, opts.cursor ?? 0);
+  let title = path ? baseName(path) : "";
+  if (!path) {
+    const n = useTabs.getState().untitledCounter + 1;
+    useTabs.setState({ untitledCounter: n });
+    title = `new ${n}.bin`;
+  }
+  const tab: Tab = {
+    id,
+    path,
+    title,
+    language: PLAINTEXT,
+    encoding: "binary",
+    hasBom: false,
+    eol: "LF",
+    dirty: false,
+    hex: true,
     preview: opts.preview || undefined,
   };
   useTabs.setState((s) => ({ tabs: [...s.tabs, tab] }));
@@ -356,8 +393,8 @@ export function moveToGroup(docId: string, fromGroup: string, target: string | "
 
 /** Show the same document in another group too (Notepad++ "Clone to Other View"). */
 export function cloneToGroup(docId: string, fromGroup: string, target: string | "new") {
-  if (getTab(docId)?.big) {
-    notify("Big files can be moved to another group, not cloned");
+  if (getTab(docId)?.big || getTab(docId)?.hex) {
+    notify("Big files and hex documents can be moved to another group, not cloned");
     return;
   }
   const { groups } = useTabs.getState();
@@ -379,7 +416,7 @@ export function splitActive() {
   const g = activeGroup();
   const doc = g.activeId && getTab(g.activeId);
   if (!doc) return;
-  if (doc.big) moveToGroup(doc.id, g.id, "new");
+  if (doc.big || doc.hex) moveToGroup(doc.id, g.id, "new");
   else cloneToGroup(doc.id, g.id, "new");
 }
 
@@ -431,7 +468,7 @@ export function restoreLayout(saved: { groups: Group[]; activeGroup: string; ori
 /** An empty, unmodified untitled tab gets replaced by the next opened file (Notepad++ style). */
 function pristineUntitled(): Tab | undefined {
   const tab = activeTab();
-  if (!tab || tab.path || tab.dirty || models.get(tab.id)?.getValueLength()) return undefined;
+  if (!tab || tab.path || tab.dirty || tab.hex || models.get(tab.id)?.getValueLength()) return undefined;
   return useTabs.getState().tabs.length === 1 ? tab : undefined;
 }
 
@@ -459,7 +496,8 @@ export async function openPaths(paths: string[], { preview = false } = {}) {
   let replace = pristineUntitled();
   const asPreview = preview && paths.length === 1;
   for (const path of paths) {
-    const existing = useTabs.getState().tabs.find((t) => t.path && samePath(t.path, path));
+    const samePathTabs = useTabs.getState().tabs.filter((t) => t.path && samePath(t.path, path));
+    const existing = samePathTabs.find((t) => !t.hex) ?? samePathTabs[0];
     if (existing) {
       activate(existing.id);
       continue;
@@ -467,8 +505,16 @@ export async function openPaths(paths: string[], { preview = false } = {}) {
     const old = asPreview ? currentPreview() : undefined;
     const place = old ? { index: old.index } : {};
     try {
-      const [size, big] = await probeFile(path);
-      if (big) {
+      const [size, big, binary] = await probeFile(path);
+      if (binary) {
+        // Opened meanwhile by another call (a quick double click): don't duplicate it.
+        const raced = useTabs.getState().tabs.find((t) => t.path && samePath(t.path, path));
+        if (raced) {
+          activate(raced.id);
+          continue;
+        }
+        await openHex(path, { preview: asPreview, ...place });
+      } else if (big) {
         await openBig(path, { preview: asPreview, ...place });
         notify(`${baseName(path)} is ${(size / 1024 / 1024).toFixed(0)} MB — opened read-only in big-file mode`);
       } else {
@@ -511,6 +557,7 @@ export function setBeforeSave(fn: (id: string) => Promise<unknown>) {
 /** Returns false if the user cancelled or the save failed. */
 export async function saveTab(id: string, forceDialog = false): Promise<boolean> {
   const tab = getTab(id);
+  if (tab?.hex) return saveHexTab(tab, forceDialog);
   const model = models.get(id);
   if (tab?.big) notify(`${tab.title} is open read-only (big-file mode)`);
   if (!tab || !model) return false;
@@ -535,6 +582,58 @@ export async function saveTab(id: string, forceDialog = false): Promise<boolean>
   markSaved(id);
   makePermanent(id);
   return true;
+}
+
+async function saveHexTab(tab: Tab, forceDialog: boolean): Promise<boolean> {
+  const view = getHexView(tab.id);
+  if (!view) return false;
+  let path = tab.path;
+  if (!path || forceDialog) {
+    const picked = await saveDialog({ defaultPath: tab.path ?? tab.title });
+    if (!picked) return false;
+    path = picked;
+  }
+  try {
+    await saveHexDoc(tab.id, path);
+  } catch (e) {
+    notify(errorMessage(e), "error");
+    return false;
+  }
+  if (path !== tab.path) patchTab(tab.id, { path, title: baseName(path) });
+  makePermanent(tab.id);
+  return true;
+}
+
+/** Open the active document's file in the hex editor (or a new empty hex document). */
+export async function reopenInHex(id = useTabs.getState().activeId) {
+  const tab = id ? getTab(id) : undefined;
+  if (tab?.hex) return;
+  if (!tab?.path) {
+    await openHex(null);
+    return;
+  }
+  const existing = useTabs.getState().tabs.find((t) => t.hex && t.path && samePath(t.path, tab.path!));
+  if (existing) return activate(existing.id);
+  if (tab.dirty) notify(`${tab.title} has unsaved changes; the hex editor shows the file as saved on disk`);
+  try {
+    await openHex(tab.path);
+  } catch (e) {
+    notify(errorMessage(e), "error");
+  }
+}
+
+/** Open the active hex document's file as text. */
+export async function reopenAsText(id = useTabs.getState().activeId) {
+  const tab = id ? getTab(id) : undefined;
+  if (!tab?.hex || !tab.path) return;
+  const existing = useTabs.getState().tabs.find((t) => !t.hex && t.path && samePath(t.path, tab.path!));
+  if (existing) return activate(existing.id);
+  try {
+    const file = await openFile(tab.path);
+    createTab({ ...file, title: file.name });
+  } catch (e) {
+    notify(errorMessage(e), "error");
+  }
 }
 
 export async function saveAll() {
@@ -565,6 +664,11 @@ function disposeTab(id: string) {
   if (big) {
     void bigfileClose(big.bigId);
     unregisterBig(id);
+  }
+  const hex = getHexView(id);
+  if (hex) {
+    void hexClose(hex.hexId);
+    unregisterHex(id);
   }
   models.get(id)?.dispose();
   models.delete(id);

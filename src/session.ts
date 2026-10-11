@@ -13,6 +13,7 @@ import {
   getModel,
   Group,
   openBig,
+  openHex,
   Orientation,
   restoreLayout,
   setViewState,
@@ -20,6 +21,7 @@ import {
   useTabs,
 } from "./store/tabs";
 import { getBigView } from "./store/bigview";
+import { getHexView } from "./store/hexview";
 import { getEditor } from "./editorRef";
 import { monaco } from "./monaco";
 import { getBookmarks, setBookmarks } from "./bookmarks";
@@ -42,6 +44,10 @@ interface SessionTab {
   big?: boolean;
   /** Big-file tabs: first visible line. */
   bigTop?: number;
+  hex?: boolean;
+  /** Hex tabs: first visible row and caret offset. */
+  hexTop?: number;
+  hexCursor?: number;
 }
 
 interface Session {
@@ -78,10 +84,14 @@ function snapshot(): Session {
     untitledCounter,
     tabs: tabs.map((t: Tab) => ({
       ...t,
-      content: t.dirty || !t.path ? getModel(t.id)?.getValue() : undefined,
+      // Hex edits aren't kept across restarts (closing asks to save them).
+      content: !t.hex && (t.dirty || !t.path) ? getModel(t.id)?.getValue() : undefined,
+      dirty: t.hex ? false : t.dirty,
       viewState: anyViewState(t.id),
       bookmarks: getBookmarks(t.id),
       bigTop: t.big ? getBigView(t.id)?.top : undefined,
+      hexTop: t.hex ? getHexView(t.id)?.top : undefined,
+      hexCursor: t.hex ? getHexView(t.id)?.cursor : undefined,
     })),
     layout: { groups, activeGroup, orientation },
     workspace: workspaceSnapshot(),
@@ -117,11 +127,15 @@ export async function restoreSession() {
   try {
     await restoreWorkspace(session.workspace);
     const disk = await Promise.all(
-      session.tabs.map((t) => (t.content === undefined && t.path && !t.big ? openFile(t.path).catch(() => null) : null)),
+      session.tabs.map((t) => (t.content === undefined && t.path && !t.big && !t.hex ? openFile(t.path).catch(() => null) : null)),
     );
     useTabs.setState({ untitledCounter: session.untitledCounter });
     // Documents are created unplaced; the saved layout puts them into groups afterwards.
     for (const [i, t] of session.tabs.entries()) {
+      if (t.hex) {
+        if (t.path) await openHex(t.path, { id: t.id, group: null, top: t.hexTop ?? 0, cursor: t.hexCursor ?? 0 }).catch(() => {});
+        continue;
+      }
       if (t.big) {
         if (t.path) await openBig(t.path, { id: t.id, group: null, top: t.bigTop ?? 0 }).catch(() => {});
         continue;

@@ -1,16 +1,19 @@
 import { useState } from "react";
 import { SearchPanel } from "./SearchPanel";
 import { OutputPanel } from "./OutputPanel";
+import { TerminalPanel } from "./TerminalPanel";
 import { closeSearch, useSearch } from "../store/search";
 import { closeOutput, useRun } from "../store/run";
 import { PanelTab, showPanelTab, usePanel } from "../store/panel";
 import { useSettings } from "../store/settings";
+import { hideTerminal, useTerminal } from "../store/terminal";
 
-/** Bottom panel with a tab per tool (Search results, Run output); shown while any is open. */
+/** Bottom panel with a tab per tool (Search results, Run output, Terminal); shown while any is open. */
 export function BottomPanel() {
   const searchOpen = useSearch((s) => s.open);
   const outputOpen = useRun((s) => s.open);
   const running = useRun((s) => s.running);
+  const terminalOpen = useTerminal((s) => s.open);
   const active = usePanel((s) => s.active);
   const height = useSettings((s) => s.searchPanelHeight);
   const [dragH, setDragH] = useState<number | null>(null);
@@ -18,6 +21,7 @@ export function BottomPanel() {
   const tabs: { id: PanelTab; label: string; open: boolean; close: () => void }[] = [
     { id: "search", label: "Search", open: searchOpen, close: closeSearch },
     { id: "output", label: "Output", open: outputOpen, close: closeOutput },
+    { id: "terminal", label: "Terminal", open: terminalOpen, close: hideTerminal },
   ];
   const visible = tabs.filter((t) => t.open);
   if (!visible.length) return null;
@@ -59,7 +63,7 @@ export function BottomPanel() {
           </div>
         ))}
       </div>
-      {current.id === "search" ? <SearchPanel /> : <OutputPanel />}
+      {current.id === "search" ? <SearchPanel /> : current.id === "output" ? <OutputPanel /> : <TerminalPanel />}
     </section>
   );
 }
