@@ -582,8 +582,24 @@ fn file_args(args: impl Iterator<Item = String>, cwd: &Path) -> Vec<String> {
 
 fn clean_path(p: std::path::PathBuf) -> String {
     let s = p.to_string_lossy().into_owned();
-    // canonicalize on Windows yields \\?\C:\..., which is noisy in the UI.
+    // canonicalize on Windows yields \\?\C:\... or \\?\UNC\server\share\..., which is noisy in the UI.
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
     s.strip_prefix(r"\\?\").map(str::to_owned).unwrap_or(s)
+}
+
+#[cfg(test)]
+mod clean_path_tests {
+    use super::clean_path;
+    use std::path::PathBuf;
+
+    #[test]
+    fn strips_verbatim_prefixes() {
+        assert_eq!(clean_path(PathBuf::from(r"\\?\C:\a\b.txt")), r"C:\a\b.txt");
+        assert_eq!(clean_path(PathBuf::from(r"\\?\UNC\10.0.0.1\share\x.log")), r"\\10.0.0.1\share\x.log");
+        assert_eq!(clean_path(PathBuf::from(r"\\server\share\x.log")), r"\\server\share\x.log");
+    }
 }
 
 /// The app was called "Text Editor" (id `com.simple.texteditor`) before 0.2.0. Copy its settings,

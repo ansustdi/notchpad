@@ -378,8 +378,11 @@ pub fn find_up(start: &Path, names: &[&str]) -> Option<PathBuf> {
 /// `canonicalize` on Windows returns `\\?\C:\...`; drop the prefix for normal-looking paths.
 fn strip_verbatim(p: PathBuf) -> PathBuf {
     let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
     match s.strip_prefix(r"\\?\") {
-        Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
+        Some(rest) => PathBuf::from(rest),
         _ => p,
     }
 }
