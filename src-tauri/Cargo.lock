@@ -2486,7 +2486,7 @@ dependencies = [
 
 [[package]]
 name = "notchpad"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "chardetng",
  "crc32fast",

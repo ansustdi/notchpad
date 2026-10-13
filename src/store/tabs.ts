@@ -554,6 +554,17 @@ export function setBeforeSave(fn: (id: string) => Promise<unknown>) {
   beforeSave = fn;
 }
 
+let afterSave: ((id: string) => unknown) | null = null;
+const saving = new Set<string>();
+
+/** Hook run after a document was written (the disk watcher re-reads its baseline). */
+export function setAfterSave(fn: (id: string) => unknown) {
+  afterSave = fn;
+}
+
+/** True while `id` is being written: its file changes, but not "by another program". */
+export const isSaving = (id: string) => saving.has(id);
+
 /** Returns false if the user cancelled or the save failed. */
 export async function saveTab(id: string, forceDialog = false): Promise<boolean> {
   const tab = getTab(id);
@@ -568,9 +579,11 @@ export async function saveTab(id: string, forceDialog = false): Promise<boolean>
     path = picked;
   }
   if (beforeSave) await beforeSave(id).catch((e) => console.error("before-save hook failed", e));
+  saving.add(id);
   try {
     await saveFile({ path, content: model.getValue(), encoding: tab.encoding, hasBom: tab.hasBom, eol: tab.eol });
   } catch (e) {
+    saving.delete(id);
     notify(errorMessage(e), "error");
     return false;
   }
@@ -581,6 +594,11 @@ export async function saveTab(id: string, forceDialog = false): Promise<boolean>
   }
   markSaved(id);
   makePermanent(id);
+  try {
+    await afterSave?.(id);
+  } finally {
+    saving.delete(id);
+  }
   return true;
 }
 
@@ -680,7 +698,7 @@ function disposeTab(id: string) {
  * Close document `id` in `groupId` (default: the active group, or wherever it is).
  * If the document is also shown in another group, only this view goes away.
  */
-export async function closeTab(id: string, groupId?: string): Promise<boolean> {
+export async function closeTab(id: string, groupId?: string, discard = false): Promise<boolean> {
   const tab = getTab(id);
   if (!tab) return true;
   const inGroups = groupsOf(id);
@@ -689,7 +707,7 @@ export async function closeTab(id: string, groupId?: string): Promise<boolean> {
     removeFromGroup(gid, id);
     return true;
   }
-  if (tab.dirty) {
+  if (tab.dirty && !discard) {
     activate(id, gid);
     const choice = await askSave(`Save changes to "${tab.title}"?`);
     if (choice === "cancel") return false;
@@ -779,17 +797,37 @@ export function setLanguage(id: string, language: string) {
 
 export const findTabByPath = (path: string) => useTabs.getState().tabs.find((t) => t.path && samePath(t.path, path));
 
-/** Re-read a clean tab after its file changed on disk; the reload is one undoable edit. */
-export async function reloadFromDisk(id: string) {
+/** File text in the model's line endings (the model normalises them), for comparing. */
+const inModelEol = (model: monaco.editor.ITextModel, text: string) =>
+  model.getEOL() === "\n" ? text.replace(/\r\n/g, "\n") : text.replace(/\r?\n/g, "\r\n");
+
+/**
+ * Re-read a tab after its file changed on disk; the reload is one undoable edit. Dirty tabs are
+ * left alone unless `discardChanges`. Returns false if nothing had to change.
+ */
+export async function reloadFromDisk(id: string, discardChanges = false): Promise<boolean> {
   const tab = getTab(id);
   const model = models.get(id);
-  if (!tab?.path || !model || tab.dirty) return;
+  if (!tab?.path || !model || (tab.dirty && !discardChanges)) return false;
   try {
     const file = await openFile(tab.path, tab.encoding);
-    model.pushEditOperations([], [{ range: model.getFullModelRange(), text: file.content }], () => null);
+    const next = inModelEol(model, file.content);
+    const old = model.getValue();
+    if (next === old) {
+      markSaved(id);
+      return false;
+    }
+    // A growing log: append only, so the view stays put and the undo entry stays small.
+    const end = model.getFullModelRange().getEndPosition();
+    const edit = next.startsWith(old)
+      ? { range: new monaco.Range(end.lineNumber, end.column, end.lineNumber, end.column), text: next.slice(old.length) }
+      : { range: model.getFullModelRange(), text: next };
+    model.pushEditOperations([], [edit], () => null);
     markSaved(id);
+    return true;
   } catch (e) {
     notify(errorMessage(e), "error");
+    return false;
   }
 }
 
@@ -802,8 +840,7 @@ export async function followDisk(id: string) {
   const model = models.get(id);
   if (!tab?.path || !model || tab.dirty) return;
   const file = await openFile(tab.path, tab.encoding);
-  // Line endings are normalised by the model, so compare in its EOL.
-  const next = model.getEOL() === "\n" ? file.content.replace(/\r\n/g, "\n") : file.content.replace(/\r?\n/g, "\r\n");
+  const next = inModelEol(model, file.content);
   const old = model.getValue();
   if (next === old) return;
   if (next.startsWith(old)) {

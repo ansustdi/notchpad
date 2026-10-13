@@ -1,6 +1,6 @@
 [package]
 name = "notchpad"
-version = "0.2.2"
+version = "0.2.3"
 description = "NotchPad: a cross-platform text and hex editor"
 authors = ["aid"]
 edition = "2021"

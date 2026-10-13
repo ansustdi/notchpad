@@ -16,6 +16,8 @@ import {
 } from "../store/workspace";
 import { resetZoom, zoomBy } from "../zoom";
 import { toggleMonitoring } from "../store/monitor";
+import { reloadTab } from "../store/diskwatch";
+import { moveToNewInstance, newInstance, openInNewInstance } from "../instance";
 import { configureFormatter, formatActive, redetectFormatters, sqlFormatOptions, toggleFormatOnSave } from "../store/format";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { allCommands, formatKeys, registerCommands, runCommand } from "./registry";
@@ -253,6 +255,10 @@ async function copySha256() {
 registerCommands([
   // File
   { id: "file.new", category: "File", label: "New", keys: "Mod+N", run: newUntitled },
+  { id: "file.reload", category: "File", label: "Reload from Disk", run: withActive(reloadTab) },
+  { id: "file.newInstance", category: "File", label: "New Instance (new window)", keys: "Mod+Shift+N", run: newInstance },
+  { id: "tab.moveToNewInstance", category: "Tab", label: "Move to New Instance", run: withActive(moveToNewInstance) },
+  { id: "tab.openInNewInstance", category: "Tab", label: "Open in New Instance", run: withActive(openInNewInstance) },
   { interactive: true, id: "file.open", category: "File", label: "Open…", keys: "Mod+O", run: openWithDialog },
   { interactive: true, id: "file.openFolder", category: "File", label: "Open Folder…", run: openFolderDialog },
   { interactive: true, id: "file.addFolder", category: "File", label: "Add Folder to Sidebar…", run: addFolderDialog },

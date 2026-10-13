@@ -577,6 +577,32 @@ fn write_app_file(app: AppHandle, name: String, content: String) -> Result<(), S
     session::write(&app, &name, &content)
 }
 
+/// Launch flag for an extra window (Notepad++ "-multiInst"): it skips the single-instance
+/// hand-off and runs without a session.
+const NEW_INSTANCE_FLAG: &str = "--new-instance";
+
+fn is_secondary() -> bool {
+    std::env::args().skip(1).any(|a| a == NEW_INSTANCE_FLAG)
+}
+
+/// True in a window started with `--new-instance` (no session, no projects).
+#[tauri::command]
+fn instance_secondary() -> bool {
+    is_secondary()
+}
+
+/// Start another NotchPad window, opening `paths` in it.
+#[tauri::command]
+fn spawn_instance(paths: Vec<String>) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    std::process::Command::new(exe)
+        .arg(NEW_INSTANCE_FLAG)
+        .args(paths)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Can't start a new instance: {e}"))
+}
+
 /// Files passed on the command line ("Open with", drag onto exe).
 #[tauri::command]
 fn startup_files() -> Vec<String> {
@@ -672,9 +698,12 @@ pub fn run() {
         )?;
         Menu::with_items(app, &[&app_menu, &edit_menu])
     });
-    builder
-        // Must be first: a second launch hands its files to the running window and exits.
-        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+    // Must be the first plugin: a second launch hands its files to the running window and exits.
+    // Windows started with --new-instance stay independent.
+    let builder = if is_secondary() {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             let files = file_args(argv.into_iter().skip(1), Path::new(&cwd));
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.unminimize();
@@ -684,11 +713,20 @@ pub fn run() {
                 let _ = app.emit("open-files", files);
             }
         }))
+    };
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             migrate_old_app_data(app.handle());
+            // Extra instances open where the mouse is (e.g. where a tab was dropped), not exactly
+            // on top of the main window.
+            if is_secondary() {
+                if let (Some(win), Ok(pos)) = (app.get_webview_window("main"), app.cursor_position()) {
+                    let _ = win.set_position(tauri::PhysicalPosition::new((pos.x - 120.0) as i32, (pos.y - 16.0).max(0.0) as i32));
+                }
+            }
             Ok(())
         })
         .manage(BigFiles::default())
@@ -701,6 +739,8 @@ pub fn run() {
             read_app_file,
             write_app_file,
             startup_files,
+            instance_secondary,
+            spawn_instance,
             search_start,
             search_cancel,
             replace_in_files,

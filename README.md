@@ -7,6 +7,7 @@ Current version: **0.2.0** (see [Changelog](#changelog)).
 ## Features (MVP)
 
 - Tabs: drag to reorder, middle-click close, right-click menu, `Ctrl+Tab` cycling, reopen closed tab
+- Multiple instances (Notepad++): File → New Instance (`Ctrl/Cmd+Shift+N`); a tab's right-click menu has Move / Open in New Instance, and dragging a tab out of the window moves it to a new one. Extra windows open where the mouse is, start empty and keep no session (closing asks about unsaved files); the main window keeps the session and projects
 - Session restore: unsaved and untitled tabs survive restarts (no "save?" prompt on exit)
 - Encoding detection (UTF-8/16 with or without BOM, legacy code pages) and round-trip on save
 - Reopen / save with a specific encoding, LF / CRLF conversion
@@ -14,6 +15,7 @@ Current version: **0.2.0** (see [Changelog](#changelog)).
 - Syntax highlighting for ~80 languages, multi-cursor, minimap, sticky scroll, bracket guides
 - Command palette (`Ctrl/Cmd+Shift+P`), text tools (sort, dedupe, case, trim)
 - Smart highlighting (Notepad++ style): select or double-click text and every occurrence turns green, with marks in the scrollbar and the match count in the status bar; whole-word for word selections, case-insensitive by default (View menu toggles)
+- Files changed by other programs reload by themselves (visible tabs within 2 s, all tabs when the window gets focus); tabs with unsaved edits ask first. File → Reload from Disk (also on the tab's right-click menu) does it by hand
 - Monitoring (tail -f), like Notepad++: View → Monitoring or the tab's right-click menu. The tab turns read-only, reloads within a second when the file changes and stays at the last line; waits for the file if it is rotated away
 - Light / dark / follow-system theme, zoom, word wrap, show whitespace
 - Drag and drop files, open from command line / "Open with" (single instance: new files open as tabs in the running window)

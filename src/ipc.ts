@@ -36,6 +36,10 @@ export const writeAppFile = (name: AppFile, content: string) =>
 
 export const startupFiles = () => invoke<string[]>("startup_files");
 
+/** True in a window started as an extra instance (no session, no projects). */
+export const instanceSecondary = () => invoke<boolean>("instance_secondary");
+export const spawnInstance = (paths: string[]) => invoke<void>("spawn_instance", { paths });
+
 export interface SearchRequest {
   root: string;
   query: string;

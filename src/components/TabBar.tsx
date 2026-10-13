@@ -22,6 +22,8 @@ import {
 import { notify, showQuickPick } from "../store/ui";
 import { isMonitored, toggleMonitoring, useMonitor } from "../store/monitor";
 import { getBigView } from "../store/bigview";
+import { moveToNewInstance, openInNewInstance } from "../instance";
+import { reloadTab } from "../store/diskwatch";
 
 function tabMenu(tab: Tab, groupId: string) {
   const items = [
@@ -30,12 +32,19 @@ function tabMenu(tab: Tab, groupId: string) {
     { id: "right", label: "Close to the Right" },
     { id: "all", label: "Close All" },
     { id: "pin", label: tab.pinned ? "Unpin" : "Pin" },
+    ...(tab.path && !tab.big && !tab.hex ? [{ id: "reload", label: "Reload from Disk" }] : []),
     ...(tab.path && !tab.hex
       ? [{ id: "monitor", label: isMonitored(tab.id) || getBigView(tab.id)?.follow ? "Stop Monitoring (tail -f)" : "Monitoring (tail -f)" }]
       : []),
     { id: "move", label: "Move to Other Group" },
     ...(tab.big || tab.hex ? [] : [{ id: "clone", label: "Clone to Other Group" }]),
     ...(tab.hex ? (tab.path ? [{ id: "asText", label: "Open as Text" }] : []) : tab.path ? [{ id: "hex", label: "Open in Hex Editor" }] : []),
+    ...(tab.path
+      ? [
+          { id: "moveInstance", label: "Move to New Instance", detail: "or drag the tab out of the window" },
+          { id: "openInstance", label: "Open in New Instance" },
+        ]
+      : []),
     ...(tab.path ? [{ id: "copyPath", label: "Copy Full Path", detail: tab.path }] : []),
     { id: "copyName", label: "Copy File Name" },
   ];
@@ -54,6 +63,8 @@ function tabMenu(tab: Tab, groupId: string) {
           return void closeAll(groupId);
         case "pin":
           return togglePin(tab.id);
+        case "reload":
+          return void reloadTab(tab.id);
         case "monitor":
           return void toggleMonitoring(tab.id);
         case "move":
@@ -62,6 +73,10 @@ function tabMenu(tab: Tab, groupId: string) {
           return void reopenInHex(tab.id);
         case "asText":
           return void reopenAsText(tab.id);
+        case "moveInstance":
+          return void moveToNewInstance(tab.id);
+        case "openInstance":
+          return void openInNewInstance(tab.id);
         case "clone":
           return cloneToGroup(tab.id, groupId, otherGroup(groupId));
         default: {
@@ -149,6 +164,12 @@ export function TabBar({ groupId }: { groupId: string }) {
     const d = drag.current;
     drag.current = null;
     setDropHint(null);
+    // Dropped outside the window: move the file to a new instance (Notepad++).
+    const outside = e.clientX < 0 || e.clientY < 0 || e.clientX > window.innerWidth || e.clientY > window.innerHeight;
+    if (d?.moved && outside && tabsRef.current.find((t) => t.id === d.id)?.path) {
+      void moveToNewInstance(d.id);
+      return;
+    }
     if (!d?.target) return;
     // Ctrl/Alt while dropping clones instead of moving (text documents only).
     if ((e.ctrlKey || e.altKey) && !tabsRef.current.find((t) => t.id === d.id)?.big) {

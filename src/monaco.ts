@@ -27,6 +27,15 @@ self.MonacoEnvironment = {
   },
 };
 
+// With fixedOverflowWidgets the editor's right-click menu lives in a shadow-DOM host appended
+// to <body>, outside `.monaco-editor`, where the theme's --vscode-* colour variables are
+// defined: the menu came out transparent. `.monaco-component` gets the same variables.
+new MutationObserver((records) => {
+  for (const r of records)
+    for (const n of r.addedNodes)
+      if (n instanceof HTMLElement && n.classList.contains("shadow-root-host")) n.classList.add("monaco-component");
+}).observe(document.body, { childList: true });
+
 export { monaco };
 
 export const PLAINTEXT = "plaintext";

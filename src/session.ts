@@ -1,6 +1,7 @@
 import { readAppFile, writeAppFile, Eol, openFile, type AppFile } from "./ipc";
 import { useSettings } from "./store/settings";
 import { projectId } from "./workspace/project";
+import { isSecondary } from "./instance";
 
 /** Where the session lives: one per project (like .sublime-workspace), else the global one. */
 export function sessionSlot(): AppFile {
@@ -66,7 +67,7 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let restoring = false;
 
 export function scheduleSessionSave() {
-  if (restoring) return;
+  if (restoring || isSecondary()) return;
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => void saveSessionNow(), SAVE_DELAY_MS);
 }
@@ -99,6 +100,7 @@ function snapshot(): Session {
 }
 
 export async function saveSessionNow() {
+  if (isSecondary()) return;
   if (timer) {
     clearTimeout(timer);
     timer = null;

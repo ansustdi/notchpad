@@ -21,6 +21,7 @@ import { activate, newUntitled, saveTab, setActiveGroup, useTabs } from "./store
 import { restoreSession, saveSessionNow } from "./session";
 import { startupFiles } from "./ipc";
 import { isMac } from "./platform";
+import { initInstance, isSecondary } from "./instance";
 
 let initialized = false;
 
@@ -29,8 +30,12 @@ async function init() {
   initialized = true;
   await loadSettings();
   installWheelZoom();
-  await restoreSession();
-  await restoreProjectFolders();
+  await initInstance();
+  // Extra windows (File → New Instance, Move to New Instance) start without the session.
+  if (!isSecondary()) {
+    await restoreSession();
+    await restoreProjectFolders();
+  }
   // Files open as tabs, folders in the sidebar.
   const files = await startupFiles().catch(() => []);
   if (files.length) await openAnything(files);
@@ -89,7 +94,9 @@ export default function App() {
     const unlisteners = [
       win.onCloseRequested(async (event) => {
         // Text buffers survive in the session; hex edits don't, so ask about those.
-        for (const tab of useTabs.getState().tabs.filter((t) => t.hex && t.dirty)) {
+        // Extra instances keep no session: ask about every unsaved tab.
+        const secondary = isSecondary();
+        for (const tab of useTabs.getState().tabs.filter((t) => t.dirty && (secondary || t.hex))) {
           activate(tab.id);
           const choice = await askSave(`Save changes to "${tab.title}"?`);
           if (choice === "cancel" || (choice === "save" && !(await saveTab(tab.id)))) {

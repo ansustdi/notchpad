@@ -8,9 +8,9 @@ const MENUS: { label: string; items: Entry[] }[] = [
   {
     label: "File",
     items: [
-      "file.new", "file.open", "file.openFolder", "file.addFolder", "file.reopenClosed", "-",
+      "file.new", "file.newInstance", "file.open", "file.openFolder", "file.addFolder", "file.reopenClosed", "-",
       { label: "Project", items: ["project.open", "project.switch", "project.saveAs", "project.close", "-", "project.edit"] }, "-",
-      "file.save", "file.saveAs", "file.saveAll", "-",
+      "file.save", "file.saveAs", "file.saveAll", "file.reload", "-",
       "file.close", "file.closeOthers", "file.closeToRight", "file.closeAll", "-",
       "file.exit",
     ],
@@ -42,7 +42,7 @@ const MENUS: { label: string; items: Entry[] }[] = [
       "view.palette", "view.sidebar", "view.revealInSidebar", "view.refreshFolders", "-",
       "markdown.preview", "markdown.previewSide", "-",
       "terminal.toggle", "run.toggleOutput", "search.togglePanel", "-",
-      { label: "Editor Layout", items: ["group.split", "group.moveToOther", "group.cloneToOther", "group.toggleLayout", "group.close", "-", "tab.pin", "view.previewTabs"] },
+      { label: "Editor Layout", items: ["group.split", "group.moveToOther", "group.cloneToOther", "group.toggleLayout", "group.close", "-", "tab.moveToNewInstance", "tab.openInNewInstance", "-", "tab.pin", "view.previewTabs"] },
       "-",
       "view.monitor", "-",
       "view.theme", "view.wordWrap", "view.minimap", "view.whitespace",

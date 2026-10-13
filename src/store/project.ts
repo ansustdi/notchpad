@@ -10,12 +10,14 @@ import { newUntitled, openPaths, resetAllTabs, useTabs } from "./tabs";
 import { addRoot, openAny, useWorkspace } from "./workspace";
 import { errorMessage, notify, showQuickPick } from "./ui";
 import { restoreSession, saveSessionNow } from "../session";
+import { isSecondary, mainOnly } from "../instance";
 import { parseProject, PROJECT_EXT, projectName, serializeProject } from "../workspace/project";
 import { baseName, samePathish } from "../workspace/tree";
 
 const RECENT_MAX = 15;
 
 export const currentProjectName = () => {
+  if (isSecondary()) return null;
   const p = useSettings.getState().currentProject;
   return p ? projectName(p) : null;
 };
@@ -59,6 +61,7 @@ async function switchTo(target: string | null, folders: string[]) {
 }
 
 export async function openProject(path: string) {
+  if (!mainOnly()) return;
   let folders: string[];
   try {
     folders = (await readProject(path)).folders.map((f) => f.path);
@@ -74,12 +77,14 @@ export async function openProject(path: string) {
 }
 
 export async function openProjectDialog() {
+  if (!mainOnly()) return;
   const picked = await openDialog({ filters: [{ name: "Project", extensions: [PROJECT_EXT] }], multiple: false });
   if (typeof picked === "string") await openProject(picked);
 }
 
 /** Save the current folders as a project file; the current tabs become that project's session. */
 export async function saveProjectAs() {
+  if (!mainOnly()) return;
   const { roots } = useWorkspace.getState();
   if (!roots.length) return notify("Open a folder first (File → Open Folder…)");
   const current = useSettings.getState().currentProject;
@@ -101,6 +106,7 @@ export async function saveProjectAs() {
 }
 
 export async function closeProject() {
+  if (!mainOnly()) return;
   if (!useSettings.getState().currentProject) return notify("No project is open");
   await switchTo(null, []);
   notify("Project closed");
@@ -114,6 +120,7 @@ export async function editProject() {
 
 /** Recent projects (Sublime: Project → Quick Switch Project, Ctrl+Alt+P). */
 export function switchProject() {
+  if (!mainOnly()) return;
   const { recentProjects, currentProject } = useSettings.getState();
   showQuickPick({
     placeholder: "Switch project",
@@ -142,7 +149,7 @@ let lastWritten = "";
 let timer: ReturnType<typeof setTimeout> | undefined;
 
 useWorkspace.subscribe((s, prev) => {
-  if (s.roots === prev.roots || syncPaused) return;
+  if (s.roots === prev.roots || syncPaused || isSecondary()) return;
   const project = useSettings.getState().currentProject;
   const key = s.roots.join("\n");
   if (!project || key === lastWritten) return;
