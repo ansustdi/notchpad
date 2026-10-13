@@ -76,6 +76,23 @@ export function bigReveal(tabId: string, line: number, match: BigMatch | null = 
   scheduleSessionSave();
 }
 
+/** Toggle follow (tail -f); turning it on jumps to the end right away. */
+export async function toggleBigFollow(tabId: string) {
+  const view = useBig.getState().views[tabId];
+  if (!view) return;
+  const follow = !view.follow;
+  patchBig(tabId, { follow });
+  if (follow) {
+    const [reset, status] = await bigfileRefresh(view.bigId).catch(() => [false, view.status] as const);
+    patchBig(tabId, (v) => ({
+      status,
+      epoch: reset ? v.epoch + 1 : v.epoch,
+      top: maxTop({ status, rows: v.rows }),
+      cursor: Math.max(0, status.lines - 1),
+    }));
+  }
+}
+
 function onStatus(bigId: number, status: IndexStatus) {
   const entry = Object.entries(useBig.getState().views).find(([, v]) => v.bigId === bigId);
   if (!entry) return;

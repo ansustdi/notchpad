@@ -10,6 +10,7 @@ import { useMacro } from "../macro/macro";
 import { runLangOf, useRun } from "../store/run";
 import { useSettings } from "../store/settings";
 import { resetZoom, zoomPercent } from "../zoom";
+import { toggleMonitoring, useMonitor } from "../store/monitor";
 
 export function StatusBar() {
   const tab = useTabs((s) => s.tabs.find((t) => t.id === s.activeId));
@@ -21,6 +22,7 @@ export function StatusBar() {
   const recording = useMacro((s) => s.recording);
   const playing = useMacro((s) => s.playing);
   const running = useRun((s) => s.running);
+  const monitored = useMonitor((s) => !!tab && s.ids.includes(tab.id));
   const python = useSettings((s) => s.python);
   const zoom = zoomPercent(useSettings((s) => s.fontSize));
   const zoomBadge =
@@ -101,6 +103,11 @@ export function StatusBar() {
           </button>
         )}
         {playing && <span>Playing macro…</span>}
+        {monitored && (
+          <button onClick={() => void toggleMonitoring(tab.id)} title="Monitoring (tail -f): read-only, reloads on change. Click to stop">
+            👁 Monitoring
+          </button>
+        )}
         {runLangOf(tab) && (
           <>
             {runLangOf(tab) === "python" && (

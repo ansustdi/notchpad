@@ -44,6 +44,7 @@ const MENUS: { label: string; items: Entry[] }[] = [
       "terminal.toggle", "run.toggleOutput", "search.togglePanel", "-",
       { label: "Editor Layout", items: ["group.split", "group.moveToOther", "group.cloneToOther", "group.toggleLayout", "group.close", "-", "tab.pin", "view.previewTabs"] },
       "-",
+      "view.monitor", "-",
       "view.theme", "view.wordWrap", "view.minimap", "view.whitespace",
       { label: "Smart Highlight", items: ["view.smartHighlight", "view.smartHighlightCase", "view.smartHighlightWord"] }, "-",
       "view.zoomIn", "view.zoomOut", "view.zoomReset",

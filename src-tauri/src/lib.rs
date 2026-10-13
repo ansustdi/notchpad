@@ -400,6 +400,18 @@ fn fs_stat(path: String) -> Option<bool> {
     std::fs::metadata(&path).ok().map(|m| m.is_dir())
 }
 
+/// (size, modified ms since epoch) of a file, None if missing. Monitoring (tail -f) polls this.
+#[tauri::command]
+fn file_sig(path: String) -> Option<(u64, u64)> {
+    let m = std::fs::metadata(&path).ok()?;
+    let modified = m
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_millis() as u64);
+    Some((m.len(), modified))
+}
+
 #[tauri::command]
 fn fs_create_file(path: String) -> Result<(), String> {
     fsops::create_file(Path::new(&path))
@@ -724,6 +736,7 @@ pub fn run() {
             fs_list_dir,
             fs_list_files,
             fs_stat,
+            file_sig,
             fs_create_file,
             fs_create_dir,
             fs_rename,

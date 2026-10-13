@@ -794,6 +794,28 @@ export async function reloadFromDisk(id: string) {
 }
 
 /**
+ * Monitoring (tail -f): bring a clean tab in line with its file. Growth is appended, anything
+ * else replaces the text. Not undoable — the tab is read-only while monitored.
+ */
+export async function followDisk(id: string) {
+  const tab = getTab(id);
+  const model = models.get(id);
+  if (!tab?.path || !model || tab.dirty) return;
+  const file = await openFile(tab.path, tab.encoding);
+  // Line endings are normalised by the model, so compare in its EOL.
+  const next = model.getEOL() === "\n" ? file.content.replace(/\r\n/g, "\n") : file.content.replace(/\r?\n/g, "\r\n");
+  const old = model.getValue();
+  if (next === old) return;
+  if (next.startsWith(old)) {
+    const end = model.getFullModelRange().getEndPosition();
+    model.applyEdits([{ range: new monaco.Range(end.lineNumber, end.column, end.lineNumber, end.column), text: next.slice(old.length) }]);
+  } else {
+    model.applyEdits([{ range: model.getFullModelRange(), text: next }]);
+  }
+  markSaved(id);
+}
+
+/**
  * A file or folder was renamed/moved on disk: point open tabs at the new location.
  * Tabs inside a renamed folder follow it too.
  */

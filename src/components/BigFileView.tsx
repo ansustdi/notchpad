@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { bigfileFind, bigfileLines, bigfileRefresh } from "../ipc";
-import { bigReveal, BigView, maxTop, patchBig, scrollBigTo, useBig } from "../store/bigview";
+import { bigfileFind, bigfileLines } from "../ipc";
+import { bigReveal, BigView, maxTop, patchBig, scrollBigTo, toggleBigFollow, useBig } from "../store/bigview";
 import { useSettings } from "../store/settings";
 import { errorMessage, notify } from "../store/ui";
 
@@ -207,20 +207,6 @@ export function BigFileView({ tabId, title }: { tabId: string; title: string }) 
     scrollBy((e.clientY - r.top < thumbY ? -1 : 1) * (rows - 1));
   };
 
-  const toggleFollow = async () => {
-    const follow = !view.follow;
-    patchBig(tabId, { follow });
-    if (follow) {
-      const [reset, status] = await bigfileRefresh(view.bigId).catch(() => [false, view.status] as const);
-      patchBig(tabId, (v) => ({
-        status,
-        epoch: reset ? v.epoch + 1 : v.epoch,
-        top: maxTop({ status, rows: v.rows }),
-        cursor: Math.max(0, status.lines - 1),
-      }));
-    }
-  };
-
   const gutterCh = Math.max(4, String(total).length);
   const pct = view.status.size ? Math.floor((view.status.indexedBytes / view.status.size) * 100) : 100;
   const visible = [];
@@ -307,7 +293,7 @@ export function BigFileView({ tabId, title }: { tabId: string; title: string }) 
           className={`sp-toggle bf-follow${view.follow ? " on" : ""}`}
           aria-pressed={view.follow}
           title="Follow: keep showing the end of the file as it grows (tail -f)"
-          onClick={() => void toggleFollow()}
+          onClick={() => void toggleBigFollow(tabId)}
         >
           Follow
         </button>

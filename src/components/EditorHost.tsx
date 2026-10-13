@@ -9,6 +9,7 @@ import { toggleBookmark } from "../bookmarks";
 import { attachRecorder } from "../macro/macro";
 import { attachSmartHighlight } from "../smartHighlight";
 import { runCommand } from "../commands/registry";
+import { useMonitor } from "../store/monitor";
 
 function publishCursor(editor: monaco.editor.IStandaloneCodeEditor) {
   const model = editor.getModel();
@@ -58,6 +59,7 @@ export function EditorHost({ groupId, hidden = false }: { groupId: string; hidde
   const activeId = useTabs((s) => s.groups.find((g) => g.id === groupId)?.activeId ?? null);
   const isActiveGroup = useTabs((s) => s.activeGroup === groupId);
   const settings = useSettings();
+  const monitored = useMonitor((s) => !!activeId && s.ids.includes(activeId));
 
   useEffect(() => {
     const s = useSettings.getState();
@@ -140,6 +142,11 @@ export function EditorHost({ groupId, hidden = false }: { groupId: string; hidde
       if (useTabs.getState().activeGroup === groupId && focusIsFree()) editor.focus();
     }
   }, [activeId, groupId]);
+
+  // Monitoring (tail -f) tabs are read-only.
+  useEffect(() => {
+    editorRef.current?.updateOptions({ readOnly: monitored });
+  }, [monitored, activeId]);
 
   // Focusing a group (Ctrl+1..4, clicking its tabs) moves the caret there.
   useEffect(() => {

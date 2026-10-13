@@ -15,6 +15,7 @@ import {
   toggleSidebar,
 } from "../store/workspace";
 import { resetZoom, zoomBy } from "../zoom";
+import { toggleMonitoring } from "../store/monitor";
 import { configureFormatter, formatActive, redetectFormatters, sqlFormatOptions, toggleFormatOnSave } from "../store/format";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { allCommands, formatKeys, registerCommands, runCommand } from "./registry";
@@ -280,6 +281,7 @@ registerCommands([
   { id: "file.closeToRight", category: "File", label: "Close Tabs to the Right", run: withActive((id) => closeToRight(id)) },
   { id: "file.closeAll", category: "File", label: "Close All Tabs", run: () => closeAll() },
   { id: "tab.pin", category: "Tab", label: "Pin / Unpin Tab", run: withActive(togglePin) },
+  { id: "view.monitor", category: "View", label: "Monitoring (tail -f)", run: withActive(toggleMonitoring) },
 
   // Editor groups (split view)
   { id: "group.split", category: "View", label: "Split Editor", keys: "Mod+\\", run: splitActive },

@@ -209,7 +209,9 @@ export const fsListFiles = (roots: string[], limit: number) =>
   invoke<{ files: string[]; truncated: boolean }>("fs_list_files", { roots, limit });
 /** true = folder, false = file, null = missing. */
 export const fsStat = (path: string) => invoke<boolean | null>("fs_stat", { path });
-export const fsCreateFile = (path: string) => invoke<void>("fs_create_file", { path });
+/** [size, modified ms] of a file, null if missing. */
+export const fileSig = (path: string) => invoke<[number, number] | null>("file_sig", { path });
+export const fsCreateFile =(path: string) => invoke<void>("fs_create_file", { path });
 export const fsCreateDir = (path: string) => invoke<void>("fs_create_dir", { path });
 export const fsRename = (from: string, to: string) => invoke<void>("fs_rename", { from, to });
 /** Copy a file or folder; never overwrites. */

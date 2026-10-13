@@ -111,13 +111,17 @@ export function Sidebar() {
   const rows = useMemo(() => flatten(roots, expanded, children), [roots, expanded, children]);
   const selIndex = rows.findIndex((r) => selected && samePathish(r.path, selected));
 
+  // The tree element only exists while folders are open: re-attach when it (re)appears,
+  // otherwise the height stays at the default and rows past it never render.
+  const hasTree = roots.length > 0;
   useLayoutEffect(() => {
     const el = boxRef.current;
     if (!el) return;
+    setHeight(el.clientHeight);
     const ro = new ResizeObserver(() => setHeight(el.clientHeight));
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [hasTree]);
 
   // Expanded folders restored from the session load when they come into view.
   useEffect(() => {

@@ -88,17 +88,23 @@ export function removeRoot(path: string) {
   fileListCache = null;
 }
 
-/** File → Open Folder: replaces the sidebar folders with the chosen one. */
+/** Paths picked in a (possibly multi-select) folder dialog. */
+async function pickFolders(): Promise<string[]> {
+  const dir = await openDialog({ directory: true, multiple: true, defaultPath: useWorkspace.getState().roots[0] });
+  if (!dir) return [];
+  return Array.isArray(dir) ? dir : [dir];
+}
+
+/** File → Open Folder: replaces the sidebar folders with the chosen one(s). */
 export async function openFolderDialog() {
-  const dir = await openDialog({ directory: true, defaultPath: useWorkspace.getState().roots[0] });
-  if (typeof dir !== "string") return;
+  const dirs = await pickFolders();
+  if (!dirs.length) return;
   set({ roots: [], expanded: {}, selected: null });
-  addRoot(dir);
+  for (const d of dirs) addRoot(d);
 }
 
 export async function addFolderDialog() {
-  const dir = await openDialog({ directory: true, multiple: true, defaultPath: useWorkspace.getState().roots[0] });
-  for (const d of Array.isArray(dir) ? dir : dir ? [dir] : []) addRoot(d);
+  for (const d of await pickFolders()) addRoot(d);
 }
 
 /** Open files as tabs and folders in the sidebar (drag and drop, command line, "Open with"). */

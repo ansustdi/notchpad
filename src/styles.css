@@ -830,7 +830,8 @@ button {
 .tab.pinned {
   padding-left: 8px;
 }
-.tab-pin {
+.tab-pin,
+.tab-monitor {
   font-size: 11px;
   filter: grayscale(0.4);
 }

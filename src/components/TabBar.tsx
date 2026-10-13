@@ -20,6 +20,8 @@ import {
   reopenAsText,
 } from "../store/tabs";
 import { notify, showQuickPick } from "../store/ui";
+import { isMonitored, toggleMonitoring, useMonitor } from "../store/monitor";
+import { getBigView } from "../store/bigview";
 
 function tabMenu(tab: Tab, groupId: string) {
   const items = [
@@ -28,6 +30,9 @@ function tabMenu(tab: Tab, groupId: string) {
     { id: "right", label: "Close to the Right" },
     { id: "all", label: "Close All" },
     { id: "pin", label: tab.pinned ? "Unpin" : "Pin" },
+    ...(tab.path && !tab.hex
+      ? [{ id: "monitor", label: isMonitored(tab.id) || getBigView(tab.id)?.follow ? "Stop Monitoring (tail -f)" : "Monitoring (tail -f)" }]
+      : []),
     { id: "move", label: "Move to Other Group" },
     ...(tab.big || tab.hex ? [] : [{ id: "clone", label: "Clone to Other Group" }]),
     ...(tab.hex ? (tab.path ? [{ id: "asText", label: "Open as Text" }] : []) : tab.path ? [{ id: "hex", label: "Open in Hex Editor" }] : []),
@@ -49,6 +54,8 @@ function tabMenu(tab: Tab, groupId: string) {
           return void closeAll(groupId);
         case "pin":
           return togglePin(tab.id);
+        case "monitor":
+          return void toggleMonitoring(tab.id);
         case "move":
           return moveToGroup(tab.id, groupId, otherGroup(groupId));
         case "hex":
@@ -89,7 +96,10 @@ export function TabBar({ groupId }: { groupId: string }) {
   const group = useTabs((s) => s.groups.find((g) => g.id === groupId));
   const allTabs = useTabs((s) => s.tabs);
   const isActiveGroup = useTabs((s) => s.activeGroup === groupId);
+  const monitored = useMonitor((s) => s.ids);
   const barRef = useRef<HTMLDivElement>(null);
+  /** Tab under a middle-button press; it closes on release over the same tab (Notepad++). */
+  const middleDown = useRef<string | null>(null);
   const drag = useRef<Drag | null>(null);
   const [dropHint, setDropHint] = useState<{ group: string; index: number } | null>(null);
 
@@ -183,7 +193,19 @@ export function TabBar({ groupId }: { groupId: string }) {
           onDoubleClick={() => makePermanent(t.id)}
           title={t.path ?? t.title}
           onPointerDown={(e) => onPointerDown(e, t.id)}
-          onAuxClick={(e) => e.button === 1 && void closeTab(t.id, groupId)}
+          onMouseDown={(e) => {
+            if (e.button !== 1) return;
+            // Stop Chromium's middle-click autoscroll, which swallows the click on the scrollable bar.
+            e.preventDefault();
+            middleDown.current = t.id;
+          }}
+          onMouseUp={(e) => {
+            if (e.button !== 1) return;
+            e.preventDefault();
+            const id = middleDown.current;
+            middleDown.current = null;
+            if (id === t.id) void closeTab(t.id, groupId);
+          }}
           onContextMenu={(e) => {
             e.preventDefault();
             tabMenu(t, groupId);
@@ -192,6 +214,11 @@ export function TabBar({ groupId }: { groupId: string }) {
           {t.pinned && (
             <span className="tab-pin" aria-label="Pinned">
               📌
+            </span>
+          )}
+          {monitored.includes(t.id) && (
+            <span className="tab-monitor" aria-label="Monitoring" title="Monitoring (tail -f)">
+              👁
             </span>
           )}
           <span className="tab-title">{t.title}</span>
