@@ -109,6 +109,16 @@ export function Sidebar() {
   const [dragW, setDragW] = useState<number | null>(null);
 
   const rows = useMemo(() => flatten(roots, expanded, children), [roots, expanded, children]);
+  // A folder can be open twice (as a root and inside another root), so paths repeat:
+  // React keys must not, or removing one copy leaves ghost rows behind.
+  const keys = useMemo(() => {
+    const seen = new Map<string, number>();
+    return rows.map((r) => {
+      const n = seen.get(r.path) ?? 0;
+      seen.set(r.path, n + 1);
+      return n ? `${r.path}#${n}` : r.path;
+    });
+  }, [rows]);
   const selIndex = rows.findIndex((r) => selected && samePathish(r.path, selected));
 
   // The tree element only exists while folders are open: re-attach when it (re)appears,
@@ -122,6 +132,13 @@ export function Sidebar() {
     ro.observe(el);
     return () => ro.disconnect();
   }, [hasTree]);
+
+  // When rows disappear (folder removed / collapsed) the browser clamps scrollTop without
+  // always firing a scroll event; a stale value would render the wrong slice of rows.
+  useLayoutEffect(() => {
+    const el = boxRef.current;
+    if (el && el.scrollTop !== scrollTop) setScrollTop(el.scrollTop);
+  });
 
   // Expanded folders restored from the session load when they come into view.
   useEffect(() => {
@@ -340,7 +357,7 @@ export function Sidebar() {
               const isActive = !r.isDir && activePath !== null && samePathish(r.path, activePath);
               return (
                 <div
-                  key={r.path}
+                  key={keys[index]}
                   role="treeitem"
                   aria-expanded={r.isDir ? !!expanded[r.path] : undefined}
                   aria-selected={index === selIndex}
